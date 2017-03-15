@@ -35,7 +35,7 @@ type (
 	LogStyle int32
 )
 
-// Note that the code in the comments are used in the gen.go file to generate the loggerers.go file
+// Note that the code in the comments are used in the gen.go file to generate the loggers.go file
 const (
 	ResetCode           = "\x1b[0m"
 	Reset      LogStyle = iota // `gen.style:"\x1b[0m"`
@@ -65,7 +65,7 @@ var filteredWriteDeadline = 5 * time.Second
 // OptFunc are functions that add options to the *Logger struct
 type OptFunc func(*logger)
 
-// FilteredFunc is the a function that takes a string and deterimes if it should be logged or not
+// FilteredFunc is the a function that takes a string and determines if it should be logged or not
 type FilteredFunc func(string) bool
 
 // nilLogger is used by the logger to log to a black hole.
@@ -199,7 +199,7 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			ts = ts.UTC()
 		}
 
-		// marshal the structred logging to the key=value represntation. (usually JSON or k=v, style)
+		// marshal the structred logging to the key=value representation. (usually JSON or k=v, style)
 		msh, err := l.marshal(kv)
 		if err != nil {
 			// logs error to stderr and dumps data, so you shouldn't lose any, but it won't be formatted correctly
@@ -245,7 +245,7 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 
 // HTTPMiddleware returns the standard HTTP handler middleware function that will capture headers for logging.
 func (l *logger) HTTPMiddleware(next http.Handler) http.Handler {
-	// lazy initalize
+	// lazy initialize
 	if l.httpkv == nil {
 		l.httpkv = make(map[string]*string)
 	}

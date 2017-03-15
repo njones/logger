@@ -21,7 +21,7 @@ func WithFilteredOutput(fn FilteredFunc, w io.Writer) OptFunc {
 // WithHTTPHeader adds a HTTP header to be captured for the structured output
 func WithHTTPHeader(header string) OptFunc {
 	return func(l *logger) {
-		// lazy intialize
+		// lazy initialize
 		if l.httpkv == nil {
 			l.httpkv = make(map[string]*string)
 		}
@@ -29,7 +29,7 @@ func WithHTTPHeader(header string) OptFunc {
 	}
 }
 
-// WithKVMarshaler allows a custom marshaler for the strucrued logging. This follows the Marshaler standard
+// WithKVMarshaler allows a custom marshaler for the structured logging. This follows the Marshaler standard
 func WithKVMarshaler(fn func(interface{}) ([]byte, error)) OptFunc {
 	return func(l *logger) {
 		l.marshal = fn

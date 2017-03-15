@@ -175,7 +175,7 @@ func (ll LogLevel) String() string {
 	return "unknown"
 }
 
-// Short is the short three letter abbrevation of the log level
+// Short is the short three letter abbreviation of the log level
 func (ll LogLevel) Short() string {
 	switch ll {
 	{{-  range $key, $value := .LogLevelsShort }}

@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-// Filter is an interface that deterimes if a filter should be completed
+// Filter is an interface that determines if a filter should be completed
 type Filter interface {
 	Flush() bool
 }
@@ -25,7 +25,7 @@ func (fw *filteredWriter) Write(p []byte) (n int, err error) {
 	return fw.buf.Write(p)
 }
 
-// Flush makes this a Filter interface. This will flush and reset the buffer. It retuns if anything was written or not
+// Flush makes this a Filter interface. This will flush and reset the buffer. It returns if anything was written or not
 func (fw *filteredWriter) Flush() bool {
 	defer fw.buf.Reset()
 

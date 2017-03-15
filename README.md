@@ -35,7 +35,7 @@ func main() {
 	log.Info("instead of info being GREEN.")
 
 	// uses structured logging
-	log.Error("The error occured here.", logger.KV("user", user), logger.KV("email", emails))
+	log.Error("The error occurred here.", logger.KV("user", user), logger.KV("email", emails))
 
 	log.Trace("Finished with main.")
 }
