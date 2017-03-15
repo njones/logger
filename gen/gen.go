@@ -190,8 +190,10 @@ func (ll LogLevel) Short() string {
 // Logger is the main interface that is presented as a logger
 type Logger interface {
 	Color(LogColor) Logger
-	OnErr(error) Logger
+	Field(string, interface{}) Logger
+	Fields(...keyValue) Logger
 	HTTPMiddleware(next http.Handler) http.Handler
+	OnErr(error) Logger
 	Suppress()
 	UnSuppress()
 {{ range $key, $value := .LogLevels }}
@@ -221,10 +223,26 @@ func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
 }
 {{- end}}
 
+// Color is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) Color(x LogColor) Logger { return l }
+
+// Field is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) Field(s string, iface interface{}) Logger {
+	return l
+}
+
+// Fields is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) Fields(kv ...keyValue) Logger {
+	return l
+}
+
 // HTTPMiddleware is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) HTTPMiddleware(next http.Handler) (r http.Handler) {
 	return next
 }
+
+// OnErr is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) OnErr(x error) Logger    { return l }
 
 // Suppress is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) Suppress()               {}
@@ -232,11 +250,6 @@ func (l *nilLogger) Suppress()               {}
 // UnSuppress is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) UnSuppress()             {}
 
-// Color is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) Color(x LogColor) Logger { return l }
-
-// OnErr is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) OnErr(x error) Logger    { return l }
 {{- range $key, $value := .LogLevels }}
 {{- $klen := (minus 19 (len $key)) }}{{- $kfmt := printf "%%%ds" $klen }}
 {{- $kflen := (minus 6 (len $key)) }}{{- $kffmt := printf "%%%ds" $kflen }}

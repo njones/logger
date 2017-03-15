@@ -4,31 +4,37 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
+	"strings"
 	"time"
 )
 
 // StdKVMarshal is the structured logging which looks like key=value, Value is a string, int, float or goString.
 func StdKVMarshal(in interface{}) ([]byte, error) {
-	var rtn string
+	var rtns []string
 	switch val := in.(type) {
 	case map[string]interface{}:
 		for k, v := range val {
 			switch vval := v.(type) {
 			case string:
-				rtn += fmt.Sprintf("%s=%s ", k, vval)
+				rtns = append(rtns, fmt.Sprintf("%s=%s", k, vval))
 			case int, int8, int16, int32, int64,
 				uint, uint8, uint16, uint32, uint64,
 				float64:
-				rtn += fmt.Sprintf("%s=%d ", k, vval)
+				rtns = append(rtns, fmt.Sprintf("%s=%d", k, vval))
 			default:
-				rtn += fmt.Sprintf("%s=%v ", k, vval)
+				rtns = append(rtns, fmt.Sprintf("%s=%v", k, vval))
 			}
 		}
 	}
-	return []byte(rtn), nil
+
+	sort.Strings(rtns)
+	return []byte(strings.Join(rtns, " ")), nil
 }
 
-// keyvalue is the struct that holds Key/Value pairs for structured logging
+type KeyValues map[string]interface{}
+
+// keyValue is the struct that holds Key/Value pairs for structured logging
 type keyValue struct {
 	K string
 	V interface{}
@@ -37,6 +43,17 @@ type keyValue struct {
 // KV is the publicly exposed function that returns a struct for structured logging
 func KV(k string, v interface{}) keyValue {
 	return keyValue{K: k, V: v}
+}
+
+// KVMap is the publicly exposed function that returns a slice of structs for structured logging of a map
+func KVMap(m KeyValues) []keyValue {
+	rtn := make([]keyValue, len(m))
+	i := 0
+	for k, v := range m {
+		rtn[i] = keyValue{K: k, V: v}
+		i++
+	}
+	return rtn
 }
 
 // NetWriter is a helper function that will log writes to a TCP/UDP address

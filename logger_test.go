@@ -130,9 +130,50 @@ func TestFilteredOutput(t *testing.T) {
 	}
 }
 
+func TestKVFieldsOutput(t *testing.T) {
+	want := []string{
+		"TEST \x1b[32m Info: Yes we KV log \x1b[0m basic=3 happy=people quarter=[pound flip]\n",
+		"TEST \x1b[32m Info: Yes we KV log \x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
+	}
+	have := new(bytes.Buffer)
+
+	l := []Logger{
+		New(WithOutput(have), WithTimeFormat("TEST")),
+		New(WithOutput(have), WithTimeFormat("TEST"), WithKVMarshaler(json.Marshal)),
+	}
+
+	for i := range want {
+		have.Reset()
+		l[i].Field("happy", "people").Field("basic", 3).Field("quarter", []string{"pound", "flip"}).Info("Yes we KV log")
+		if want[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+		}
+	}
+
+	for i := range want {
+		have.Reset()
+		l[i].Fields(KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"})).Info("Yes we KV log")
+		if want[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+		}
+	}
+
+	for i := range want {
+		have.Reset()
+		l[i].Fields(KVMap(KeyValues{
+			"happy":   "people",
+			"basic":   3,
+			"quarter": []string{"pound", "flip"},
+		})...).Info("Yes we KV log")
+		if want[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+		}
+	}
+}
+
 func TestKVOutput(t *testing.T) {
 	want := []string{
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m happy=people basic=3 quarter=[pound flip] \n",
+		"TEST \x1b[32m Info: Yes we KV log \x1b[0m basic=3 happy=people quarter=[pound flip]\n",
 		"TEST \x1b[32m Info: Yes we KV log \x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
 		"TEST \x1b[32m Info: Yes we KV log \x1b[0m [ERR logger.go (marshal)]: map[string]interface {}{\"happy\":\"people\", \"basic\":3, \"quarter\":[]string{\"pound\", \"flip\"}}\n",
 	}
@@ -317,7 +358,7 @@ func TestHttpHandlerOutput(t *testing.T) {
 	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
 	wantBody := `This is a simple test`
 
-	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m X-Session-Id=Test \n"
+	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m X-Session-Id=Test\n"
 	have := new(bytes.Buffer)
 
 	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeFormat("TEST"))

@@ -87,7 +87,7 @@ type logger struct {
 	filter []io.Writer
 
 	httpkv  map[string]*string
-	ctxkv   map[string]*string
+	ctxkv   map[string]interface{}
 	marshal func(v interface{}) ([]byte, error)
 
 	stderr io.Writer
@@ -109,6 +109,7 @@ func New(options ...OptFunc) Logger {
 		prefix: func(pfx LogLevel) string {
 			return pfx.String() + ":"
 		},
+		ctxkv: make(map[string]interface{}),
 		fatal: func(i int) { os.Exit(i) },
 	}
 
@@ -151,6 +152,20 @@ func (l *logger) Color(color LogColor) Logger {
 	return l
 }
 
+// Field overrides the default color
+func (l *logger) Field(key string, value interface{}) Logger {
+	l.ctxkv[key] = value
+	return l
+}
+
+// Field overrides the default color
+func (l *logger) Fields(kvs ...keyValue) Logger {
+	for i := range kvs {
+		l.ctxkv[kvs[i].K] = kvs[i].V
+	}
+	return l
+}
+
 func (l *logger) println(prefix LogLevel, iface ...interface{}) {
 	l.print("ln", prefix, "", iface...)
 }
@@ -170,9 +185,9 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 		kv[k] = *v
 	}
 
-	// add any http keys to the internal structured kv logging map
+	// add any context keys to the internal structured kv logging map
 	for k, v := range l.ctxkv {
-		kv[k] = *v
+		kv[k] = v
 	}
 
 	// filter out all of the structured kv logging stucts and add to the map
