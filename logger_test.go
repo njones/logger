@@ -144,7 +144,9 @@ func TestKVFieldsOutput(t *testing.T) {
 
 	for i := range want {
 		have.Reset()
-		l[i].Field("happy", "people").Field("basic", 3).Field("quarter", []string{"pound", "flip"}).Info("Yes we KV log")
+		l[i].Field("happy", "people").Field("basic", 3).Field("quarter", []string{"pound", "flip"})
+		l[i].Info("Yes we KV log")
+
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
@@ -152,7 +154,9 @@ func TestKVFieldsOutput(t *testing.T) {
 
 	for i := range want {
 		have.Reset()
-		l[i].Fields(KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"})).Info("Yes we KV log")
+		l[i].Fields(KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
+		l[i].Info("Yes we KV log")
+
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
@@ -164,7 +168,9 @@ func TestKVFieldsOutput(t *testing.T) {
 			"happy":   "people",
 			"basic":   3,
 			"quarter": []string{"pound", "flip"},
-		})...).Info("Yes we KV log")
+		})...)
+		l[i].Info("Yes we KV log")
+
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
