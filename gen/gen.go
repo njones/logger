@@ -64,10 +64,10 @@ func main() {
 				for _, kv := range keyvals {
 					kvs := strings.Split(kv, ":")
 					k := kvs[0]
-					// v := strings.Trim(kvs[1], `"`)
+					v := strings.Trim(kvs[1], `"`)
 
 					if k == "gen.color" {
-						internal.LogColors[val.Names[0].Name] = val.Names[0].Name
+						internal.LogColors[val.Names[0].Name] = v
 					}
 				}
 			}
@@ -134,7 +134,6 @@ var packageTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`// go
 package logger
 
 import (
-	"fmt"
 	"net/http"
 )
 
@@ -142,7 +141,7 @@ import (
 func (lc LogColor) String() string {
 	switch lc {
 	{{-  range $key, $value := .LogColors }}
-	case {{ $value }}:
+	case {{ $key }}:
 		return "{{ $key }}"
 	{{- end}}
 	}
@@ -150,9 +149,16 @@ func (lc LogColor) String() string {
 	return "unknown"
 }
 
-// color2ESC returns the VT100 escape codes for a color
-func color2ESC(color LogColor) string {
-	return fmt.Sprintf("\x1b[%dm", int32(color))
+// String is the string representation of the color int32 number
+func (lc LogColor) ToESCColor() string {
+	switch lc {
+	{{-  range $key, $value := .LogColors }}
+	case {{ $key }}:
+		return "{{ $value }}"
+	{{- end}}
+	}
+
+	return "0"
 }
 
 // Level returns the log level used
@@ -205,21 +211,21 @@ type Logger interface {
 // {{ $key }} is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}(iface ...interface{}) {
 	l.l.Lock() // locks in the color change
-	defer l.l.Unlock()
 	if l.color == "" {
-		l.color = color2ESC({{ index $.LogHasESCColors $key }})
+		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
 	}
 	l.println({{ $value }}, iface...)
+	l.l.Unlock()
 }
 
 // {{ $key }}f is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
 	l.l.Lock() // locks in the color change
-	defer l.l.Unlock()
 	if l.color == "" {
-		l.color = color2ESC({{ index $.LogHasESCColors $key }})
+		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
 	}
 	l.printf({{ $value }}, fmt, iface...)
+	l.l.Unlock()
 }
 {{- end}}
 

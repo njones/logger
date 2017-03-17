@@ -482,18 +482,24 @@ func TestConcurrentInfofWarnf(t *testing.T) {
 }
 
 func BenchmarkNonFormat(b *testing.B) {
+	b.ReportAllocs()
+
 	have := new(bytes.Buffer)
 	l := New(withStdOut(have))
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		l.Info("Testing with a string of", i)
 	}
 }
 
 func BenchmarkFormat(b *testing.B) {
+	b.ReportAllocs()
+
 	have := new(bytes.Buffer)
 	l := New(withStdOut(have))
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		l.Infof("Testing with a string of %02d", i)
 	}

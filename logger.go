@@ -148,7 +148,7 @@ func (l *logger) OnErr(err error) Logger {
 
 // Color overrides the default color
 func (l *logger) Color(color LogColor) Logger {
-	l.color = color2ESC(color)
+	l.color = color.ToESCColor()
 	return l
 }
 
@@ -175,10 +175,40 @@ func (l *logger) printf(prefix LogLevel, format string, iface ...interface{}) {
 	l.print("f", prefix, format, iface...)
 }
 
+var kvMapPool = sync.Pool{
+	New: func() interface{} {
+		return make(map[string]interface{})
+	},
+}
+
 // print is the internal function that prints the log line to the output writer(s)
 func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interface{}) {
+	var kv map[string]interface{}
+
 	prefix := l.prefix(pfx)
-	kv := make(map[string]interface{})
+
+	// pre-allocate the memory for all of the data needed in the slices
+	inlnkv := make([]keyValue, 0, len(iface))
+	inlnif := make([]interface{}, 3, len(iface)+5) //(3 prefixed then two possible after)
+
+	// filter out all of the structured kv logging stucts and add to the map
+	for _, iv := range iface {
+		if val, ok := iv.(keyValue); ok {
+			inlnkv = append(inlnkv, val)
+			continue
+		}
+		inlnif = append(inlnif, iv)
+	}
+
+	if len(l.httpkv) > 0 || len(l.ctxkv) > 0 || len(inlnkv) > 0 {
+		kv = kvMapPool.Get().(map[string]interface{})
+		defer func() {
+			for k := range kv {
+				delete(kv, k)
+			}
+			kvMapPool.Put(kv)
+		}()
+	}
 
 	// add any http keys to the internal structured kv logging map
 	for k, v := range l.httpkv {
@@ -190,14 +220,9 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 		kv[k] = v
 	}
 
-	// filter out all of the structured kv logging stucts and add to the map
-	for i := 0; i < len(iface); i++ {
-		n := iface[i]
-		if val, ok := n.(keyValue); ok {
-			kv[val.K] = val.V
-			iface = append(iface[:i], iface[i+1:]...)
-			i--
-		}
+	// add any context keys to the internal structured kv logging map
+	for _, val := range inlnkv {
+		kv[val.K] = val.V
 	}
 
 	// check to see if we should be writing to the io.Writers for this logger
@@ -214,36 +239,41 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			ts = ts.UTC()
 		}
 
-		// marshal the structred logging to the key=value representation. (usually JSON or k=v, style)
-		msh, err := l.marshal(kv)
-		if err != nil {
-			// logs error to stderr and dumps data, so you shouldn't lose any, but it won't be formatted correctly
-			fmt.Fprintln(l.stderr, "error marshaling:", err)
-			msh = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", kv))
-		}
-
 		// add color codes
 		if l.color != "" {
-			iface = append(iface, ResetCode)
+			inlnif = append(inlnif, ResetCode)
 		}
 
 		// add kv with marshaled structured logging
-		if len(msh) > 0 {
-			iface = append(iface, string(msh))
+		if len(kv) > 0 {
+			// marshal the structred logging to the key=value representation. (usually JSON or k=v, style)
+			msh, err := l.marshal(kv)
+			if err != nil {
+				// logs error to stderr and dumps data, so you shouldn't lose any, but it won't be formatted correctly
+				fmt.Fprintln(l.stderr, "error marshaling:", err)
+				msh = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", kv))
+			}
+			if len(msh) > 0 {
+				inlnif = append(inlnif, string(msh))
+			}
 		}
+
+		// add all of the prefix data to the interface slice.
+		inlnif[0], inlnif[1], inlnif[2] = ts.Format(l.tsFormat), l.color, prefix
 
 		// send to all of the out io.Writers
 		switch kind {
 		case "ln":
-			if _, err := fmt.Fprintln(l.w, append([]interface{}{ts.Format(l.tsFormat), l.color, prefix}, iface...)...); err != nil {
+			if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
 				fmt.Fprintln(l.stderr, "error writting to log:", err)
 			}
 		case "f":
-			if _, err := fmt.Fprintf(l.w, "%s %s %s "+format+" %s\n", append([]interface{}{ts.Format(l.tsFormat), l.color, prefix}, iface...)...); err != nil {
+			if _, err := fmt.Fprintf(l.w, "%s %s %s "+format+" %s\n", inlnif...); err != nil {
 				fmt.Fprintln(l.stderr, "error writting to formatted log:", err)
 			}
 		}
-		// close out the filtered writers
+
+		// flush the filtered writers
 		for _, out := range l.filter {
 			if fo, ok := out.(Filter); ok {
 				fo.Flush()
