@@ -181,52 +181,17 @@ var kvMapPool = sync.Pool{
 	},
 }
 
+var ifSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]interface{}, 3)
+	},
+}
+
 // print is the internal function that prints the log line to the output writer(s)
 func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interface{}) {
-	var kv map[string]interface{}
-
-	prefix := l.prefix(pfx)
-
-	// pre-allocate the memory for all of the data needed in the slices
-	inlnkv := make([]keyValue, 0, len(iface))
-	inlnif := make([]interface{}, 3, len(iface)+5) //(3 prefixed then two possible after)
-
-	// filter out all of the structured kv logging stucts and add to the map
-	for _, iv := range iface {
-		if val, ok := iv.(keyValue); ok {
-			inlnkv = append(inlnkv, val)
-			continue
-		}
-		inlnif = append(inlnif, iv)
-	}
-
-	if len(l.httpkv) > 0 || len(l.ctxkv) > 0 || len(inlnkv) > 0 {
-		kv = kvMapPool.Get().(map[string]interface{})
-		defer func() {
-			for k := range kv {
-				delete(kv, k)
-			}
-			kvMapPool.Put(kv)
-		}()
-	}
-
-	// add any http keys to the internal structured kv logging map
-	for k, v := range l.httpkv {
-		kv[k] = *v
-	}
-
-	// add any context keys to the internal structured kv logging map
-	for k, v := range l.ctxkv {
-		kv[k] = v
-	}
-
-	// add any context keys to the internal structured kv logging map
-	for _, val := range inlnkv {
-		kv[val.K] = val.V
-	}
-
 	// check to see if we should be writing to the io.Writers for this logger
 	if !l.hide {
+		var kv = kvMapPool.Get().(map[string]interface{})
 
 		var ts time.Time
 		if l.ts == nil {
@@ -237,6 +202,46 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 
 		if l.tsIsUTC {
 			ts = ts.UTC()
+		}
+
+		// pre-allocate the memory for all of the data needed in the slices
+		inlnkv := make([]keyValue, 0)
+		inlnif := ifSlicePool.Get().([]interface{})
+		copy(inlnif[0:], []interface{}{ts.Format(l.tsFormat), l.color, l.prefix(pfx)})
+
+		defer func() {
+			for k := range kv {
+				delete(kv, k)
+			}
+			kvMapPool.Put(kv)
+
+			inlnif = inlnif[:3]
+
+			ifSlicePool.Put(inlnif)
+		}()
+
+		// filter out all of the structured kv logging stucts and add to the map
+		for _, iv := range iface {
+			if val, ok := iv.(keyValue); ok {
+				inlnkv = append(inlnkv, val)
+				continue
+			}
+			inlnif = append(inlnif, iv)
+		}
+
+		// add any http keys to the internal structured kv logging map
+		for k, v := range l.httpkv {
+			kv[k] = *v
+		}
+
+		// add any context keys to the internal structured kv logging map
+		for k, v := range l.ctxkv {
+			kv[k] = v
+		}
+
+		// add any context keys to the internal structured kv logging map
+		for _, val := range inlnkv {
+			kv[val.K] = val.V
 		}
 
 		// add color codes
@@ -257,9 +262,6 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 				inlnif = append(inlnif, string(msh))
 			}
 		}
-
-		// add all of the prefix data to the interface slice.
-		inlnif[0], inlnif[1], inlnif[2] = ts.Format(l.tsFormat), l.color, prefix
 
 		// send to all of the out io.Writers
 		switch kind {

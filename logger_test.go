@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -214,7 +216,7 @@ func TestOnErrorOutput(t *testing.T) {
 	l := New(WithOutput(have), WithTimeFormat("TEST"))
 
 	var err error
-	l.OnErr(err).Info("This is a simple test that I an error")
+	l.OnErr(err).Info("This is a simple test that is NOT an error")
 	err = errors.New("simple test")
 	l.OnErr(err).Info("This is a", err)
 
@@ -313,18 +315,32 @@ func TestNetOutput(t *testing.T) {
 			defer l.Close()
 
 			go func() {
-				conn.SetReadDeadline(<-time.After(5 * time.Second))
+				<-time.After(5 * time.Second)
+				conn.Close()
 			}()
 
 			var i int64
 			have := new(bytes.Buffer)
+			mx := 100
+			m := 0
 			for i < int64(len(want)) {
-				i, err = have.ReadFrom(conn)
+				i, err = io.Copy(have, conn)
+				if i == 0 {
+					var bb = make([]byte, 1)
+					conn.Read(bb)
+					log.Println(bb)
+					fmt.Print(".")
+					if m >= mx {
+						t.Log("breaking... nil")
+						break
+					}
+					m++
+				}
 				if err != nil {
+					t.Log("breaking...", err)
 					break
 				}
 			}
-
 			haveCh <- have.String()
 		}
 	}()
