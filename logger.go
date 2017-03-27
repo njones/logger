@@ -65,9 +65,6 @@ var filteredWriteDeadline = 5 * time.Second
 // OptFunc are functions that add options to the *Logger struct
 type OptFunc func(*logger)
 
-// FilteredFunc is the a function that takes a string and determines if it should be logged or not
-type FilteredFunc func(string) bool
-
 // nilLogger is used by the logger to log to a black hole.
 type nilLogger struct{}
 
@@ -76,9 +73,10 @@ type logger struct {
 	w io.Writer
 	l sync.Mutex
 
-	ts       *time.Time
-	tsIsUTC  bool
-	tsFormat string
+	ts          *time.Time
+	tsIsUTC     bool
+	tsFormat    string
+	tsFormatted string // preformatted
 
 	hide   bool
 	color  string // the ESC string value
@@ -97,6 +95,10 @@ type logger struct {
 	fatal func(int)
 }
 
+func rtnLogLevelStr(pfx LogLevel) string {
+	return pfx.StringWithColon()
+}
+
 // New returns a new logger that can be used for logging.
 func New(options ...OptFunc) Logger {
 
@@ -105,12 +107,10 @@ func New(options ...OptFunc) Logger {
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 		marshal:  StdKVMarshal,
-		tsFormat: "Jan-2-2006 15:04:05",
-		prefix: func(pfx LogLevel) string {
-			return pfx.String() + ":"
-		},
-		ctxkv: make(map[string]interface{}),
-		fatal: func(i int) { os.Exit(i) },
+		tsFormat: "",
+		prefix:   rtnLogLevelStr,
+		ctxkv:    make(map[string]interface{}),
+		fatal:    func(i int) { os.Exit(i) },
 	}
 
 	// apply all of the options to this logger
@@ -183,8 +183,27 @@ var kvMapPool = sync.Pool{
 
 var ifSlicePool = sync.Pool{
 	New: func() interface{} {
-		return make([]interface{}, 3)
+		return make([]interface{}, 0)
 	},
+}
+
+// itoa is pulled from the go stdlib (log.go) and slightly modified to work with an array
+// instead of a slice
+// Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
+func itoa(buf *[20]byte, i int, wid int, start int) {
+	// Assemble decimal in reverse order.
+	var b [20]byte
+	bp := len(b) - 1
+	for i >= 10 || wid > 1 {
+		wid--
+		q := i / 10
+		b[bp] = byte('0' + i - q*10)
+		bp--
+		i = q
+	}
+	// i < 10
+	b[bp] = byte('0' + i)
+	copy((*buf)[start:], b[bp:])
 }
 
 // print is the internal function that prints the log line to the output writer(s)
@@ -204,10 +223,41 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			ts = ts.UTC()
 		}
 
+		var tsFormatted string
+		if l.tsFormatted != "" {
+			tsFormatted = l.tsFormatted
+		} else {
+			switch v := l.tsFormat; v {
+			case "":
+				// the standard  format
+				var n int
+				var buf = [...]byte{'J', 'a', 'n', '-', '1', '0', '-', '1', '9', '7', '0', ' ', '2', '4', ':', '0', '0', ':', '0', '0'}
+				copy(buf[0:], ts.Month().String()[:3])
+				buf[3] = '-'
+				itoa(&buf, ts.Day(), -1, 4)
+				if ts.Day() > 9 {
+					n += 1
+				}
+				buf[5+n] = '-'
+				itoa(&buf, ts.Year(), 4, 6+n)
+				buf[10+n] = ' '
+
+				itoa(&buf, ts.Hour(), 2, 11+n)
+				buf[13+n] = ':'
+				itoa(&buf, ts.Minute(), 2, 14+n)
+				buf[16+n] = ':'
+				itoa(&buf, ts.Second(), 2, 17+n)
+
+				tsFormatted = string(buf[:19+n]) // Jan-2-2006 15:04:05
+			default:
+				// this is much more memory and is slower than the std formatting
+				tsFormatted = ts.Format(l.tsFormat)
+			}
+		}
+
 		// pre-allocate the memory for all of the data needed in the slices
-		inlnkv := make([]keyValue, 0)
 		inlnif := ifSlicePool.Get().([]interface{})
-		copy(inlnif[0:], []interface{}{ts.Format(l.tsFormat), l.color, l.prefix(pfx)})
+		inlnif = append(inlnif, tsFormatted+" "+l.color+" "+l.prefix(pfx))
 
 		defer func() {
 			for k := range kv {
@@ -215,19 +265,13 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			}
 			kvMapPool.Put(kv)
 
-			inlnif = inlnif[:3]
+			for i := range inlnif {
+				inlnif[i] = nil
+			}
+			inlnif = inlnif[:0]
 
 			ifSlicePool.Put(inlnif)
 		}()
-
-		// filter out all of the structured kv logging stucts and add to the map
-		for _, iv := range iface {
-			if val, ok := iv.(keyValue); ok {
-				inlnkv = append(inlnkv, val)
-				continue
-			}
-			inlnif = append(inlnif, iv)
-		}
 
 		// add any http keys to the internal structured kv logging map
 		for k, v := range l.httpkv {
@@ -239,9 +283,13 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			kv[k] = v
 		}
 
-		// add any context keys to the internal structured kv logging map
-		for _, val := range inlnkv {
-			kv[val.K] = val.V
+		// filter out all of the structured kv logging stucts and add to the map
+		for _, iv := range iface {
+			if val, ok := iv.(keyValue); ok {
+				kv[val.K] = val.V
+				continue
+			}
+			inlnif = append(inlnif, iv)
 		}
 
 		// add color codes
@@ -270,7 +318,7 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 				fmt.Fprintln(l.stderr, "error writting to log:", err)
 			}
 		case "f":
-			if _, err := fmt.Fprintf(l.w, "%s %s %s "+format+" %s\n", inlnif...); err != nil {
+			if _, err := fmt.Fprintf(l.w, "%s "+format+" %s\n", inlnif...); err != nil {
 				fmt.Fprintln(l.stderr, "error writting to formatted log:", err)
 			}
 		}

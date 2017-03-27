@@ -4,6 +4,9 @@ import (
 	"io"
 )
 
+// FilteredStringFunc is the a function that takes a string and determines if it should be logged or not
+type FilteredStringFunc func(string) bool
+
 // WithOutput adds a new writer to the logging output
 func WithOutput(w io.Writer) OptFunc {
 	return func(l *logger) {
@@ -11,10 +14,10 @@ func WithOutput(w io.Writer) OptFunc {
 	}
 }
 
-// WithFilteredOutput adds a new writer that is filtered by the function presented. This returns a func which takes the same input as the WithOutput function.
-func WithFilteredOutput(fn FilteredFunc, w io.Writer) OptFunc {
+// WithFilteredStringOutput adds a new writer that is filtered by the function presented. This returns a func which takes the same input as the WithOutput function.
+func WithFilteredStringOutput(fn FilteredStringFunc, w io.Writer) OptFunc {
 	return func(l *logger) {
-		l.filter = append(l.filter, &filteredWriter{w: w, fn: fn})
+		l.filter = append(l.filter, &filteredStringWriter{w: w, fn: fn})
 	}
 }
 

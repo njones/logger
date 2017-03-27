@@ -181,6 +181,18 @@ func (ll LogLevel) String() string {
 	return "unknown"
 }
 
+// String is the string representation of the log level
+func (ll LogLevel) StringWithColon() string {
+	switch ll {
+	{{-  range $key, $value := .LogLevels }}
+	case {{ $value }}:
+		return "{{ $key }}:"
+	{{- end}}
+	}
+
+	return "unknown"
+}
+
 // Short is the short three letter abbreviation of the log level
 func (ll LogLevel) Short() string {
 	switch ll {

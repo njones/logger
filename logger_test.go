@@ -25,6 +25,12 @@ func withTime(t time.Time) OptFunc {
 	}
 }
 
+func withTimeFormatted(str string) OptFunc {
+	return func(l *logger) {
+		l.tsFormatted = str
+	}
+}
+
 func withStdErr(b *bytes.Buffer) OptFunc {
 	return func(l *logger) {
 		l.stderr = b
@@ -60,12 +66,12 @@ func TestMultipleOutput(t *testing.T) {
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), WithTimeFormat("TEST"), withFatal)
+	l := New(WithOutput(have), withTimeFormatted("TEST"), withFatal)
 	for i, lg := range []tt{l.Info, l.Warn, l.Error, l.Debug, l.Trace, l.Fatal} {
 		have.Reset()
 		lg("This is", "a test")
 		if want[i] != have.String() {
-			t.Logf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
 	}
 
@@ -75,7 +81,7 @@ func TestMultipleOutput(t *testing.T) {
 
 	x := len(want) - 1
 	if want[x] != have.String() {
-		t.Logf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
 	}
 }
 
@@ -99,7 +105,7 @@ func TestMultipleShortOutput(t *testing.T) {
 		have.Reset()
 		lg("This is", "a test")
 		if want[i] != have.String() {
-			t.Logf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
 	}
 
@@ -109,11 +115,11 @@ func TestMultipleShortOutput(t *testing.T) {
 
 	x := len(want) - 1
 	if want[x] != have.String() {
-		t.Logf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
 	}
 }
 
-func TestFilteredOutput(t *testing.T) {
+func TestFilteredStringOutput(t *testing.T) {
 	want := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
 	have := new(bytes.Buffer)
 
@@ -121,14 +127,14 @@ func TestFilteredOutput(t *testing.T) {
 		return !strings.Contains(s, "skip")
 	}
 
-	l := New(WithFilteredOutput(fn, have), WithTimeFormat("TEST"))
+	l := New(WithFilteredStringOutput(fn, have), WithTimeFormat("TEST"))
 
 	l.Info("This is a simple test [1]")
 	l.Info("This is a simple test that I skip")
 	l.Info("This is a simple test [2]")
 
 	if want != have.String() {
-		t.Logf("\nwant: %q\n\nhave: %q\n", want, have.String())
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
 	}
 }
 
@@ -187,6 +193,7 @@ func TestKVOutput(t *testing.T) {
 	}
 	have := new(bytes.Buffer)
 
+	// what will be output to stderr...
 	errWant := "error marshaling: " + strMarshalError + "\n"
 	errHave := new(bytes.Buffer)
 
@@ -199,6 +206,33 @@ func TestKVOutput(t *testing.T) {
 	for i := range want {
 		have.Reset()
 		l[i].Info("Yes we KV log", KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
+
+		// HARDCODED //
+		// if this is an error marshaling then do a different type of compare, becuase the map can be randomized
+		if i == 2 { // 2 is the thrid element of the array change this if things change
+			sep := "interface {}"
+			haveSplit := strings.Split(have.String(), sep)
+			wantSplit := strings.Split(want[i], sep)
+
+			if wantSplit[0] != haveSplit[0] {
+				t.Errorf("\nwant[a]: %q\n\nhave[a]: %q\n", want[i], have.String())
+			}
+
+			cutset := "{,}\n"
+			haveSplitMap := strings.Split(strings.Trim(haveSplit[1], cutset), " ")
+			wantSplitMap := strings.Split(strings.Trim(wantSplit[1], cutset), " ")
+
+			sort.Strings(haveSplitMap)
+			sort.Strings(wantSplitMap)
+
+			for j := range wantSplitMap {
+				if strings.Trim(wantSplitMap[j], cutset) != strings.Trim(haveSplitMap[j], cutset) {
+					t.Errorf("\nwant[%d]: %q\n\nhave[%d]: %q\n", j, want[i], j, have.String())
+					t.Errorf("\nwant[%d]: %q\n\nhave[%d]: %q\n", j, wantSplitMap[j], j, haveSplitMap[j])
+				}
+			}
+			continue
+		}
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
@@ -245,7 +279,7 @@ func TestMultipleFormattedOutput(t *testing.T) {
 		have.Reset()
 		lg("This is %s %d %#02x", "a test", 4, 1)
 		if want[i] != have.String() {
-			t.Logf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
 		}
 	}
 
@@ -255,23 +289,37 @@ func TestMultipleFormattedOutput(t *testing.T) {
 
 	x := len(want) - 1
 	if want[x] != have.String() {
-		t.Logf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
 	}
 }
 
 func TestUTCTime(t *testing.T) {
-	want := "Mar-7-1971 17:03:01 \x1b[32m Info: This is a simple test \x1b[0m\n"
+	want := "Mar-6-1974 16:03:01 \x1b[32m Info: This is a simple test \x1b[0m\n"
 	have := new(bytes.Buffer)
 
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
 		t.Error(err)
 	}
-	l := New(withTime(time.Date(1971, time.March, 7, 9, 3, 1, 0, loc)), WithOutput(have), WithTimeAsUTC)
+	l := New(withTime(time.Date(1974, time.March, 6, 9, 3, 1, 0, loc)), WithOutput(have), WithTimeAsUTC)
 
 	l.Info("This is a simple test")
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+	}
+
+	want2 := "Mar-27-1976 17:03:01 \x1b[32m Info: This is a simple test \x1b[0m\n"
+	have2 := new(bytes.Buffer)
+
+	loc2, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Error(err)
+	}
+	l2 := New(withTime(time.Date(1976, time.March, 27, 9, 3, 1, 0, loc2)), WithOutput(have2), WithTimeAsUTC)
+
+	l2.Info("This is a simple test")
+	if want2 != have2.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want2, have2.String())
 	}
 }
 
@@ -450,7 +498,7 @@ func TestConcurrentInfofWarnf(t *testing.T) {
 	finish := make(chan struct{}, 1)
 	rand.Seed(time.Now().UnixNano())
 
-	l := New(withStdOut(have), WithTimeFormat("TEST"))
+	l := New(withStdOut(have), withTimeFormatted("TEST"))
 
 	xx := 10
 	nn := 4

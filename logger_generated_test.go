@@ -27,6 +27,10 @@ func TestNilLogger(t *testing.T) {
 	nl.Tracef("fmt", "Test")
 	nl.Warn("Test")
 	nl.Warnf("fmt", "Test")
+
+	nl.Field("key", "value")
+	nl.Fields(KV("key", "value"), KV("key", "value"))
+	nl.Fields(KVMap(KeyValues{"key": "value"})...)
 }
 
 func TestLogLevels(t *testing.T) {
@@ -68,6 +72,32 @@ func TestLogLevels(t *testing.T) {
 	if ukn != LogLevel(3).Short() {
 		t.Errorf("\nwant: %s\n\nhave: %s\n", ukn, LogLevel(3).Short())
 	}
+
+	if ukn != LogLevel(3).StringWithColon() {
+		t.Errorf("\nwant: %s\n\nhave: %s\n", ukn, LogLevel(3).StringWithColon())
+	}
+}
+
+func TestLogLevelString(t *testing.T) {
+	want := []string{"Debug", "Error", "Fatal", "Info", "Trace", "Warn"}
+	wantWithColon := []string{"Debug:", "Error:", "Fatal:", "Info:", "Trace:", "Warn:"}
+	have := []LogLevel{Level().Debug, Level().Error, Level().Fatal, Level().Info, Level().Trace, Level().Warn}
+
+	if len(want) != len(have) {
+		t.Error("Test want and test have don't have equal lengths, check the test.")
+	}
+
+	for i := range want {
+		if want[i] != have[i].String() {
+			t.Errorf("\nwant: %s\n\nhave: %s\n", want[i], have[i].String())
+		}
+	}
+
+	for i := range wantWithColon {
+		if wantWithColon[i] != have[i].StringWithColon() {
+			t.Errorf("\nwant: %s\n\nhave: %s\n", wantWithColon[i], have[i].StringWithColon())
+		}
+	}
 }
 
 func TestLogColors(t *testing.T) {
@@ -87,5 +117,25 @@ func TestLogColors(t *testing.T) {
 	ukn := "unknown"
 	if ukn != LogColor(200).String() {
 		t.Errorf("\nwant: %s\n\nhave: %s\n", ukn, LogColor(200).String())
+	}
+}
+
+func TestLogESCColors(t *testing.T) {
+	want := []string{"\x1b[30m", "\x1b[34m", "\x1b[36m", "\x1b[32m", "\x1b[35m", "\x1b[31m", "\x1b[37m", "\x1b[33m"}
+	have := []LogColor{Black, Blue, Cyan, Green, Magenta, Red, White, Yellow}
+
+	if len(want) != len(have) {
+		t.Error("Test want and test have don't have equal lengths, check the test.")
+	}
+
+	for i := range want {
+		if want[i] != have[i].ToESCColor() {
+			t.Errorf("\nwant: %s\n\nhave: %s\n", want[i], have[i].ToESCColor())
+		}
+	}
+
+	ukn := "0"
+	if ukn != LogColor(200).ToESCColor() {
+		t.Errorf("\nwant: %s\n\nhave: %s\n", ukn, LogColor(200).ToESCColor())
 	}
 }
