@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,6 +26,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() {
+		cmd := exec.Command("go", "fmt", genFileIn)
+		err := cmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("go code formatted...")
+	}()
 	defer lf.Close()
 
 	fset := token.NewFileSet() // positions are relative to fset
