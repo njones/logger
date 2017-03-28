@@ -66,7 +66,7 @@ const (
 	NoESCColor = "no-color"
 )
 
-// the diferent formats that can be printed out
+// the different formats that can be printed out
 const (
 	formatNone = "-f"
 	formatHave = "+f"
