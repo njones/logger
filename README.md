@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/njones/logger.svg?branch=master)](https://travis-ci.org/njones/logger) [![GoDoc](https://godoc.org/github.com/njones/logger?status.svg)](https://godoc.org/github.com/njones/logger)
+[![Build Status](https://travis-ci.org/njones/logger.svg?branch=master)](https://travis-ci.org/njones/logger) [![GoDoc](https://godoc.org/github.com/njones/logger?status.svg)](https://godoc.org/github.com/njones/logger) [![Go Report Card](https://goreportcard.com/badge/github.com/njones/logger)](https://goreportcard.com/report/github.com/njones/logger)
 
 # Logger
 
