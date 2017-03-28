@@ -1,7 +1,7 @@
 //go:generate go run gen/gen.go
 
 /*
-package logger is a full featured level logger that can track logging across microservices infrastructure
+Package logger is a full featured level logger that can track logging across microservices infrastructure
 */
 package logger
 
@@ -36,7 +36,8 @@ type (
 	LogStyle int32
 )
 
-// Note that the code in the comments are used in the gen.go file to generate the loggers.go file
+// The VT-100 escape codes for different formatting options
+// Note that the code in the comments are used in the gen.go file to generate the logger_generated.go file
 const (
 	ResetCode           = "\x1b[0m"
 	Reset      LogStyle = iota // `gen.style:"\x1b[0m"`
@@ -50,6 +51,8 @@ const (
 	Hidden                     // `gen.style:"\x1b[08m"`
 )
 
+// The color number of the escape sequence
+// Note that the code in the comments are used in the gen.go file to generate the logger_generated.go file
 const (
 	Black   LogColor = iota + 30 // `gen.color:"\x1b[30m"`
 	Red                          // `gen.color:"\x1b[31m"`
@@ -63,6 +66,7 @@ const (
 	NoESCColor = "no-color"
 )
 
+// the diferent formats that can be printed out
 const (
 	formatNone = "-f"
 	formatHave = "+f"
@@ -340,15 +344,15 @@ func (l *logger) printx(kind string, pfx LogLevel, format string, iface ...inter
 		switch kind {
 		case formatNone:
 			if _, err := fmt.Fprint(l.w, inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writting print to log:", err)
+				fmt.Fprintln(l.stderr, "error writing print to log:", err)
 			}
 		case formatHave:
 			if _, err := fmt.Fprintf(l.w, "%s "+format+" %s\n", inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writting printf to log:", err)
+				fmt.Fprintln(l.stderr, "error writing printf to log:", err)
 			}
 		case formatLine:
 			if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writting println to log:", err)
+				fmt.Fprintln(l.stderr, "error writing println to log:", err)
 			}
 		}
 

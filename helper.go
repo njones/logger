@@ -32,6 +32,7 @@ func StdKVMarshal(in interface{}) ([]byte, error) {
 	return []byte(strings.Join(rtns, " ")), nil
 }
 
+// KeyValues is a map of Key/Value pairs that are used in structured logging
 type KeyValues map[string]interface{}
 
 // keyValue is the struct that holds Key/Value pairs for structured logging

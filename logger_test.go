@@ -360,8 +360,8 @@ func TestKVOutput(t *testing.T) {
 		l[i].Info("Yes we KV log", KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
 
 		// HARDCODED //
-		// if this is an error marshaling then do a different type of compare, becuase the map can be randomized
-		if i == 2 { // 2 is the thrid element of the array change this if things change
+		// if this is an error marshaling then do a different type of compare, because the map can be randomized
+		if i == 2 { // 2 is the third element of the array change this if things change
 			sep := "interface {}"
 			haveSplit := strings.Split(have.String(), sep)
 			wantSplit := strings.Split(want[i], sep)
@@ -522,9 +522,9 @@ func TestNetOutput(t *testing.T) {
 	}
 
 	errWant := []string{
-		"error writting println to log: dial abc: unknown network abc\n",
-		"error writting printf to log: dial abc: unknown network abc\n",
-		"error writting print to log: dial abc: unknown network abc\n",
+		"error writing println to log: dial abc: unknown network abc\n",
+		"error writing printf to log: dial abc: unknown network abc\n",
+		"error writing print to log: dial abc: unknown network abc\n",
 	}
 	errHave := new(bytes.Buffer)
 
@@ -726,7 +726,7 @@ func BenchmarkNone(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		l.Print("Testing with a string of %02d", i)
+		l.Print("Testing with a string of ", i)
 	}
 }
 

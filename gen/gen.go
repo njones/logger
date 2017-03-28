@@ -194,7 +194,7 @@ func (lc LogColor) String() string {
 	return "unknown"
 }
 
-// String is the string representation of the color int32 number
+// ToESCColor is the escape string representation of the color int32 number
 func (lc LogColor) ToESCColor() string {
 	switch lc {
 	{{-  range $key, $value := .LogColors }}
@@ -230,7 +230,7 @@ func (ll LogLevel) String() string {
 	return "unknown"
 }
 
-// String is the string representation of the log level
+// StringWithColon is the string representation of the log level with trailing colon
 func (ll LogLevel) StringWithColon() string {
 	switch ll {
 	{{-  range $key, $value := .LogLevels }}
