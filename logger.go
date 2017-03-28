@@ -73,18 +73,21 @@ const (
 	formatLine = "ln"
 )
 
+// a buffer pool for maps that will print key/value pairs
 var kvMapPool = sync.Pool{
 	New: func() interface{} {
 		return make(map[string]interface{})
 	},
 }
 
+// a buffer pool for the slice to print interface values
 var ifSlicePool = sync.Pool{
 	New: func() interface{} {
 		return make([]interface{}, 0)
 	},
 }
 
+// the internal deadline for timeout to a io.Writer
 var filteredWriteDeadline = 5 * time.Second
 
 // OptFunc are functions that add options to the *Logger struct
@@ -177,7 +180,7 @@ func (l *logger) Color(color LogColor) Logger {
 	return l
 }
 
-// Color overrides the default color
+// NoColor removes color from the output
 func (l *logger) NoColor() Logger {
 	l.color = NoESCColor
 	return l
@@ -189,7 +192,8 @@ func (l *logger) Field(key string, value interface{}) Logger {
 	return l
 }
 
-// Field overrides the default color
+// Fields overrides the default color with key value pairs.
+// The KVMap function can be used to add values from a map
 func (l *logger) Fields(kvs ...keyValue) Logger {
 	for i := range kvs {
 		l.ctxkv[kvs[i].K] = kvs[i].V
@@ -197,6 +201,7 @@ func (l *logger) Fields(kvs ...keyValue) Logger {
 	return l
 }
 
+// print the internal function that prints non-formatted logging
 func (l *logger) print(prefix LogLevel, iface ...interface{}) {
 	l.printx(formatNone, prefix, "", iface...)
 }
@@ -206,11 +211,12 @@ func (l *logger) printf(prefix LogLevel, format string, iface ...interface{}) {
 	l.printx(formatHave, prefix, format, iface...)
 }
 
+// println the internal function that prints logging with a newline
 func (l *logger) println(prefix LogLevel, iface ...interface{}) {
 	l.printx(formatLine, prefix, "", iface...)
 }
 
-// print is the internal function that prints the log line to the output writer(s)
+// printx is the internal function that prints the log line to the output writer(s)
 func (l *logger) printx(kind string, pfx LogLevel, format string, iface ...interface{}) {
 
 	// check to see if we should be writing to the io.Writers for this logger
