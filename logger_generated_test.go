@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+// this just runs the nil logger and doesn't test for anything
+// because nothing is supposed to happen with a nil logger
 func TestNilLogger(t *testing.T) {
 	nl := new(nilLogger)
 
@@ -13,20 +15,33 @@ func TestNilLogger(t *testing.T) {
 	nl.UnSuppress()
 
 	nl.Color(Black).OnErr(errors.New("Test")).Info("Test")
+	nl.NoColor().Info("Test")
 	nl.HTTPMiddleware(http.NotFoundHandler())
 
 	nl.Debug("Test")
 	nl.Debugf("fmt", "Test")
+	nl.Debugln("Test")
 	nl.Error("Test")
 	nl.Errorf("fmt", "Test")
+	nl.Errorln("Test")
 	nl.Fatal("Test")
 	nl.Fatalf("fmt", "Test")
+	nl.Fatalln("Test")
+	nl.Print("Test")
+	nl.Printf("fmt", "Test")
+	nl.Println("Test")
+	nl.Panic("Test")
+	nl.Panicf("fmt", "Test")
+	nl.Panicln("Test")
 	nl.Info("Test")
 	nl.Infof("fmt", "Test")
+	nl.Infoln("Test")
 	nl.Trace("Test")
 	nl.Tracef("fmt", "Test")
+	nl.Traceln("Test")
 	nl.Warn("Test")
 	nl.Warnf("fmt", "Test")
+	nl.Warnln("Test")
 
 	nl.Field("key", "value")
 	nl.Fields(KV("key", "value"), KV("key", "value"))
@@ -36,32 +51,32 @@ func TestNilLogger(t *testing.T) {
 func TestLogLevels(t *testing.T) {
 	i := 1
 	if Level().Info != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Info, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Info, i)
 	}
 
 	i += i
 	if Level().Warn != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Warn, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Warn, i)
 	}
 
 	i += i
 	if Level().Error != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Error, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Error, i)
 	}
 
 	i += i
 	if Level().Debug != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Debug, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Debug, i)
 	}
 
 	i += i
 	if Level().Trace != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Trace, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Trace, i)
 	}
 
 	i += i
 	if Level().Fatal != LogLevel(i) {
-		t.Logf("\nwant: %d\n\nhave: %d\n", Level().Fatal, i)
+		t.Errorf("\nwant: %d\n\nhave: %d\n", Level().Fatal, i)
 	}
 
 	ukn := "unknown"
@@ -79,9 +94,9 @@ func TestLogLevels(t *testing.T) {
 }
 
 func TestLogLevelString(t *testing.T) {
-	want := []string{"Debug", "Error", "Fatal", "Info", "Trace", "Warn"}
-	wantWithColon := []string{"Debug:", "Error:", "Fatal:", "Info:", "Trace:", "Warn:"}
-	have := []LogLevel{Level().Debug, Level().Error, Level().Fatal, Level().Info, Level().Trace, Level().Warn}
+	want := []string{"Debug", "Error", "Fatal", "Info", "Trace", "Warn", "Panic"}
+	wantWithColon := []string{"Debug:", "Error:", "Fatal:", "Info:", "Trace:", "Warn:", "Panic:"}
+	have := []LogLevel{Level().Debug, Level().Error, Level().Fatal, Level().Info, Level().Trace, Level().Warn, Level().Panic}
 
 	if len(want) != len(have) {
 		t.Error("Test want and test have don't have equal lengths, check the test.")

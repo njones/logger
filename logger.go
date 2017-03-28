@@ -16,12 +16,13 @@ import (
 
 // level holds the different log levels that are supported
 type level struct {
-	Info  LogLevel // `gen.short:"INF", gen.show:"Green""`
-	Warn  LogLevel // `gen.short:"WRN", gen.show:"Yellow"`
-	Error LogLevel // `gen.short:"ERR", gen.show:"Red"`
-	Debug LogLevel // `gen.short:"DBG", gen.show:"Cyan"`
-	Trace LogLevel // `gen.short:"TRC", gen.show:"Blue"`
-	Fatal LogLevel // `gen.short:"FAT", gen.show:"Red"`
+	Info  LogLevel // `gen.short:"INF" gen.show:"Green" gen.alias:"Print" gen.stdlog.compat:"true,Print"`
+	Warn  LogLevel // `gen.short:"WRN" gen.show:"Yellow"`
+	Error LogLevel // `gen.short:"ERR" gen.show:"Red"`
+	Debug LogLevel // `gen.short:"DBG" gen.show:"Cyan"`
+	Trace LogLevel // `gen.short:"TRC" gen.show:"Blue"`
+	Fatal LogLevel // `gen.short:"FAT" gen.show:"Red" gen.stdlog.compat:"true"`
+	Panic LogLevel // `gen.short:"PAN" gen.show:"Red" gen.stdlog.compat:"true"`
 } // `gen-level:"*"`
 
 type (
@@ -58,7 +59,27 @@ const (
 	Magenta                      // `gen.color:"\x1b[35m"`
 	Cyan                         // `gen.color:"\x1b[36m"`
 	White                        // `gen.color:"\x1b[37m"`
+
+	NoESCColor = "no-color"
 )
+
+const (
+	formatNone = "-f"
+	formatHave = "+f"
+	formatLine = "ln"
+)
+
+var kvMapPool = sync.Pool{
+	New: func() interface{} {
+		return make(map[string]interface{})
+	},
+}
+
+var ifSlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]interface{}, 0)
+	},
+}
 
 var filteredWriteDeadline = 5 * time.Second
 
@@ -152,6 +173,12 @@ func (l *logger) Color(color LogColor) Logger {
 	return l
 }
 
+// Color overrides the default color
+func (l *logger) NoColor() Logger {
+	l.color = NoESCColor
+	return l
+}
+
 // Field overrides the default color
 func (l *logger) Field(key string, value interface{}) Logger {
 	l.ctxkv[key] = value
@@ -166,48 +193,22 @@ func (l *logger) Fields(kvs ...keyValue) Logger {
 	return l
 }
 
-func (l *logger) println(prefix LogLevel, iface ...interface{}) {
-	l.print("ln", prefix, "", iface...)
+func (l *logger) print(prefix LogLevel, iface ...interface{}) {
+	l.printx(formatNone, prefix, "", iface...)
 }
 
 // printf the internal function that prints formatted logging
 func (l *logger) printf(prefix LogLevel, format string, iface ...interface{}) {
-	l.print("f", prefix, format, iface...)
+	l.printx(formatHave, prefix, format, iface...)
 }
 
-var kvMapPool = sync.Pool{
-	New: func() interface{} {
-		return make(map[string]interface{})
-	},
-}
-
-var ifSlicePool = sync.Pool{
-	New: func() interface{} {
-		return make([]interface{}, 0)
-	},
-}
-
-// itoa is pulled from the go stdlib (log.go) and slightly modified to work with an array
-// instead of a slice
-// Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
-func itoa(buf *[20]byte, i int, wid int, start int) {
-	// Assemble decimal in reverse order.
-	var b [20]byte
-	bp := len(b) - 1
-	for i >= 10 || wid > 1 {
-		wid--
-		q := i / 10
-		b[bp] = byte('0' + i - q*10)
-		bp--
-		i = q
-	}
-	// i < 10
-	b[bp] = byte('0' + i)
-	copy((*buf)[start:], b[bp:])
+func (l *logger) println(prefix LogLevel, iface ...interface{}) {
+	l.printx(formatLine, prefix, "", iface...)
 }
 
 // print is the internal function that prints the log line to the output writer(s)
-func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interface{}) {
+func (l *logger) printx(kind string, pfx LogLevel, format string, iface ...interface{}) {
+
 	// check to see if we should be writing to the io.Writers for this logger
 	if !l.hide {
 		var kv = kvMapPool.Get().(map[string]interface{})
@@ -232,6 +233,8 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 				// the standard  format
 				var n int
 				var buf = [...]byte{'J', 'a', 'n', '-', '1', '0', '-', '1', '9', '7', '0', ' ', '2', '4', ':', '0', '0', ':', '0', '0'}
+
+				// month-day-year
 				copy(buf[0:], ts.Month().String()[:3])
 				buf[3] = '-'
 				itoa(&buf, ts.Day(), -1, 4)
@@ -242,6 +245,7 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 				itoa(&buf, ts.Year(), 4, 6+n)
 				buf[10+n] = ' '
 
+				// time
 				itoa(&buf, ts.Hour(), 2, 11+n)
 				buf[13+n] = ':'
 				itoa(&buf, ts.Minute(), 2, 14+n)
@@ -257,7 +261,17 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 
 		// pre-allocate the memory for all of the data needed in the slices
 		inlnif := ifSlicePool.Get().([]interface{})
-		inlnif = append(inlnif, tsFormatted+" "+l.color+" "+l.prefix(pfx))
+		switch {
+		case l.color == NoESCColor:
+			inlnif = append(inlnif, tsFormatted+" "+l.prefix(pfx))
+		default:
+			inlnif = append(inlnif, tsFormatted+" "+l.color+" "+l.prefix(pfx))
+		}
+
+		switch kind {
+		case formatNone:
+			inlnif = append(inlnif, " ")
+		}
 
 		defer func() {
 			for k := range kv {
@@ -293,7 +307,7 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 		}
 
 		// add color codes
-		if l.color != "" {
+		if l.color != "" && l.color != NoESCColor {
 			inlnif = append(inlnif, ResetCode)
 		}
 
@@ -311,15 +325,30 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			}
 		}
 
+		if pfx == Level().Panic {
+			switch kind {
+			case formatNone:
+				panic(fmt.Sprint(inlnif...))
+			case formatHave:
+				panic(fmt.Sprintf("%s "+format+" %s\n", inlnif...))
+			case formatLine:
+				panic(fmt.Sprintln(inlnif...))
+			}
+		}
+
 		// send to all of the out io.Writers
 		switch kind {
-		case "ln":
-			if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writting to log:", err)
+		case formatNone:
+			if _, err := fmt.Fprint(l.w, inlnif...); err != nil {
+				fmt.Fprintln(l.stderr, "error writting print to log:", err)
 			}
-		case "f":
+		case formatHave:
 			if _, err := fmt.Fprintf(l.w, "%s "+format+" %s\n", inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writting to formatted log:", err)
+				fmt.Fprintln(l.stderr, "error writting printf to log:", err)
+			}
+		case formatLine:
+			if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
+				fmt.Fprintln(l.stderr, "error writting println to log:", err)
 			}
 		}
 
@@ -330,12 +359,16 @@ func (l *logger) print(kind string, pfx LogLevel, format string, iface ...interf
 			}
 		}
 
-		l.color = "" // remove color, so we can be ready for the next one.
+		if l.color != NoESCColor {
+			l.color = "" // remove color, so we can be ready for the next one.
+		}
 	}
 
-	if pfx == Level().Fatal {
+	switch pfx {
+	case Level().Fatal:
 		l.fatal(int(pfx))
 	}
+
 }
 
 // HTTPMiddleware returns the standard HTTP handler middleware function that will capture headers for logging.
@@ -351,4 +384,23 @@ func (l *logger) HTTPMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// itoa is pulled from the go stdlib (log.go) and slightly modified to work with an array
+// instead of a slice
+// Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
+func itoa(buf *[20]byte, i int, wid int, start int) {
+	// Assemble decimal in reverse order.
+	var b [20]byte
+	bp := len(b) - 1
+	for i >= 10 || wid > 1 {
+		wid--
+		q := i / 10
+		b[bp] = byte('0' + i - q*10)
+		bp--
+		i = q
+	}
+	// i < 10
+	b[bp] = byte('0' + i)
+	copy((*buf)[start:], b[bp:])
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 )
@@ -38,17 +39,21 @@ func main() {
 	cmap := ast.NewCommentMap(fset, f, f.Comments)
 
 	internal := struct {
-		Timestamp       time.Time
-		LogLevels       map[string]uint
-		LogLevelsShort  map[string]uint
-		LogColors       map[string]string
-		LogHasESCColors map[string]string
+		Timestamp        time.Time
+		LogLevels        map[string]uint
+		LogLevelsShort   map[string]uint
+		LogColors        map[string]string
+		LogHasESCColors  map[string]string
+		LogStdCompatible map[string]string
+		LogAlias         map[string]bool
 	}{
-		Timestamp:       time.Now().UTC(),
-		LogLevels:       make(map[string]uint),
-		LogLevelsShort:  make(map[string]uint),
-		LogColors:       make(map[string]string),
-		LogHasESCColors: make(map[string]string),
+		Timestamp:        time.Now().UTC(),
+		LogLevels:        make(map[string]uint),
+		LogLevelsShort:   make(map[string]uint),
+		LogColors:        make(map[string]string),
+		LogHasESCColors:  make(map[string]string),
+		LogStdCompatible: make(map[string]string),
+		LogAlias:         make(map[string]bool),
 	}
 
 	rx := regexp.MustCompile("//\\s+`(.*)`")
@@ -60,7 +65,7 @@ func main() {
 			foundComment := rx.FindAllStringSubmatch(vv[0].List[0].Text, 1)
 			if len(foundComment) > 0 && len(foundComment[0]) > 1 {
 				commentTag := foundComment[0][1]
-				keyvals := strings.Split(commentTag, ",")
+				keyvals := strings.Split(commentTag, " ")
 				for _, kv := range keyvals {
 					kvs := strings.Split(kv, ":")
 					k := kvs[0]
@@ -77,8 +82,11 @@ func main() {
 
 			foundComment := rx.FindAllStringSubmatch(vv[0].List[0].Text, 1)
 			if len(foundComment) > 0 && len(foundComment[0]) > 1 {
+				var wait sync.WaitGroup
+
+				colorCh := make(chan string, 1)
 				commentTag := foundComment[0][1]
-				keyvals := strings.Split(commentTag, ",")
+				keyvals := strings.Split(commentTag, " ")
 				for _, kv := range keyvals {
 					kvs := strings.Split(kv, ":")
 					k := strings.TrimSpace(kvs[0])
@@ -86,8 +94,24 @@ func main() {
 
 					if k == "gen.show" {
 						internal.LogHasESCColors[val.Names[0].Name] = v
+						colorCh <- v
+					}
+
+					if k == "gen.stdlog.compat" {
+						vs := strings.Split(v, ",")
+						if len(vs) > 1 {
+							for i := 1; i < len(vs); i++ {
+								wait.Add(1)
+								// this is in a go routine so it can come before or after
+								go func(j int) {
+									wait.Done()
+									internal.LogHasESCColors[vs[j]] = <-colorCh
+								}(i)
+							}
+						}
 					}
 				}
+				wait.Wait()
 			}
 		}
 
@@ -97,11 +121,11 @@ func main() {
 				if val.Specs[0].(*ast.TypeSpec).Name.Name == "level" {
 					for k3, v3 := range val.Specs[0].(*ast.TypeSpec).Type.(*ast.StructType).Fields.List {
 
-						var short string
+						var short, alias string
 						foundComment := rx.FindAllStringSubmatch(v3.Comment.List[0].Text, 1)
 						if len(foundComment) > 0 && len(foundComment[0]) > 1 {
 							commentTag := foundComment[0][1]
-							keyvals := strings.Split(commentTag, ",")
+							keyvals := strings.Split(commentTag, " ")
 							for _, kv := range keyvals {
 								kvs := strings.Split(kv, ":")
 								k := strings.TrimSpace(kvs[0])
@@ -110,11 +134,32 @@ func main() {
 								if k == "gen.short" {
 									short = v
 								}
+
+								if k == "gen.alias" {
+									alias = v
+								}
+
+								if k == "gen.stdlog.compat" {
+									vs := strings.Split(v, ",")
+									if len(vs) == 1 {
+										internal.LogStdCompatible[v3.Names[0].Name] = vs[0]
+									} else {
+										for i := 1; i < len(vs); i++ {
+											internal.LogStdCompatible[vs[i]] = vs[0]
+										}
+									}
+								}
 							}
 						}
 
 						internal.LogLevels[v3.Names[0].Name] = 1 << uint(k3)
 						internal.LogLevelsShort[short] = 1 << uint(k3)
+
+						if alias != "" {
+							internal.LogLevels[alias] = 1 << uint(k3)
+							internal.LogLevelsShort[short] = 1 << uint(k3)
+							internal.LogAlias[alias] = true
+						}
 					}
 				}
 			}
@@ -143,7 +188,7 @@ func (lc LogColor) String() string {
 	{{-  range $key, $value := .LogColors }}
 	case {{ $key }}:
 		return "{{ $key }}"
-	{{- end}}
+	{{- end }}
 	}
 
 	return "unknown"
@@ -155,7 +200,7 @@ func (lc LogColor) ToESCColor() string {
 	{{-  range $key, $value := .LogColors }}
 	case {{ $key }}:
 		return "{{ $value }}"
-	{{- end}}
+	{{- end }}
 	}
 
 	return "0"
@@ -164,8 +209,10 @@ func (lc LogColor) ToESCColor() string {
 // Level returns the log level used
 func Level() (lvl level) {
 {{-  range $key, $value := .LogLevels }}
+{{- if ne true (index $.LogAlias $key) }}
 	lvl.{{ $key }} = {{ $value }}
-{{- end}}
+{{- end }}
+{{- end }}
 	return lvl
 }
 
@@ -173,9 +220,11 @@ func Level() (lvl level) {
 func (ll LogLevel) String() string {
 	switch ll {
 	{{-  range $key, $value := .LogLevels }}
+	{{- if ne true (index $.LogAlias $key) }}
 	case {{ $value }}:
 		return "{{ $key }}"
-	{{- end}}
+	{{- end }}
+	{{- end }}
 	}
 
 	return "unknown"
@@ -185,9 +234,11 @@ func (ll LogLevel) String() string {
 func (ll LogLevel) StringWithColon() string {
 	switch ll {
 	{{-  range $key, $value := .LogLevels }}
+	{{- if ne true (index $.LogAlias $key) }}
 	case {{ $value }}:
 		return "{{ $key }}:"
-	{{- end}}
+	{{- end }}
+	{{- end }}
 	}
 
 	return "unknown"
@@ -197,9 +248,11 @@ func (ll LogLevel) StringWithColon() string {
 func (ll LogLevel) Short() string {
 	switch ll {
 	{{-  range $key, $value := .LogLevelsShort }}
+	{{- if ne true (index $.LogAlias $key) }}
 	case {{ $value }}:
 		return "{{ $key }}"
-	{{- end}}
+	{{- end }}
+	{{- end }}
 	}
 
 	return "unknown"
@@ -208,6 +261,7 @@ func (ll LogLevel) Short() string {
 // Logger is the main interface that is presented as a logger
 type Logger interface {
 	Color(LogColor) Logger
+	NoColor() Logger
 	Field(string, interface{}) Logger
 	Fields(...keyValue) Logger
 	HTTPMiddleware(next http.Handler) http.Handler
@@ -215,15 +269,56 @@ type Logger interface {
 	Suppress()
 	UnSuppress()
 {{ range $key, $value := .LogLevels }}
+{{- if eq "true" (index $.LogStdCompatible $key)}}
+    {{ $key }}(...interface{})
+	{{ $key }}f(string, ...interface{})
+	{{ $key }}ln(...interface{})
+{{- else }}
 	{{ $key }}(...interface{})
 	{{ $key }}f(string, ...interface{})
-{{- end}}
+{{- end }}
+{{- end }}
 }
 {{ range $key, $value := .LogLevels }}
+{{- if eq "true" (index $.LogStdCompatible $key)}}
 // {{ $key }} is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}(iface ...interface{}) {
 	l.l.Lock() // locks in the color change
-	if l.color == "" {
+	switch l.color {
+	case "":
+		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
+	}
+	l.print({{ $value }}, iface...)
+	l.l.Unlock()
+}
+
+// {{ $key }}f is the generated logger function to satisfy the interface
+func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
+	l.l.Lock() // locks in the color change
+	switch l.color {
+	case "":
+		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
+	}
+	l.printf({{ $value }}, fmt, iface...)
+	l.l.Unlock()
+}
+
+// {{ $key }}ln is the generated logger function to satisfy the interface
+func (l *logger) {{ $key }}ln(iface ...interface{}) {
+	l.l.Lock() // locks in the color change
+	switch l.color {
+	case "":
+		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
+	}
+	l.println({{ $value }}, iface...)
+	l.l.Unlock()
+}
+{{ else }}
+// {{ $key }} is the generated logger function to satisfy the interface
+func (l *logger) {{ $key }}(iface ...interface{}) {
+	l.l.Lock() // locks in the color change
+	switch l.color {
+	case "":
 		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
 	}
 	l.println({{ $value }}, iface...)
@@ -233,16 +328,21 @@ func (l *logger) {{ $key }}(iface ...interface{}) {
 // {{ $key }}f is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
 	l.l.Lock() // locks in the color change
-	if l.color == "" {
+	switch l.color {
+	case "":
 		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
 	}
 	l.printf({{ $value }}, fmt, iface...)
 	l.l.Unlock()
 }
-{{- end}}
+{{- end }}
+{{- end }}
 
 // Color is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) Color(x LogColor) Logger { return l }
+
+// NoColor is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) NoColor() Logger { return l }
 
 // Field is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) Field(s string, iface interface{}) Logger {
@@ -269,14 +369,18 @@ func (l *nilLogger) Suppress()               {}
 func (l *nilLogger) UnSuppress()             {}
 
 {{- range $key, $value := .LogLevels }}
-{{- $klen := (minus 19 (len $key)) }}{{- $kfmt := printf "%%%ds" $klen }}
-{{- $kflen := (minus 6 (len $key)) }}{{- $kffmt := printf "%%%ds" $kflen }}
+{{- $klen := (minus 20 (len $key)) }}{{- $kfmt := printf "%%%ds" $klen }}
+{{- $kflen := (minus 7 (len $key)) }}{{- $kffmt := printf "%%%ds" $kflen }}
+{{- $klnlen := (minus 6 (len $key)) }}{{- $klnfmt := printf "%%%ds" $klnlen }}
 
 // {{ $key }} is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) {{ $key }}(iface ...interface{}){{ printf $kfmt "" }}{ return }
 
 // {{ $key }}f is the nilLogger function to satisfy the interface. It does nothing.
 func (l *nilLogger) {{ $key }}f(fmt string, iface ...interface{}){{ printf $kffmt "" }}{ return }
-{{- end}}
+
+// {{ $key }}ln is the nilLogger function to satisfy the interface. It does nothing.
+func (l *nilLogger) {{ $key }}ln(iface ...interface{}){{ printf $klnfmt "" }}{ return }
+{{- end }}
 
 `))
