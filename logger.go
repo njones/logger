@@ -395,8 +395,8 @@ func (l *logger) printx(kind string, pfx LogLevel, color string, format string, 
 
 	// flush the filtered writers
 	for _, out := range l.filter {
-		if fo, ok := out.(FilterFlusher); ok {
-			if fs, ok := out.(FilterOn); ok {
+		if fo, ok := out.(filterFlusher); ok {
+			if fs, ok := out.(filterOn); ok {
 				fs.On(fString)
 			}
 			fo.Flush()

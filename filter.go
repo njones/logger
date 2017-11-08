@@ -12,12 +12,12 @@ type FilteredByteFunc func(*filteredByteWriter, []byte) []byte
 type FilteredStringFunc func(string) bool
 
 // FilterFlusher is an interface that determines if a filter should be completed
-type FilterFlusher interface {
+type filterFlusher interface {
 	Flush() bool
 }
 
 // FilterString is an interface that determines if a filter should take the raw data to filter on
-type FilterOn interface {
+type filterOn interface {
 	On(string)
 }
 
