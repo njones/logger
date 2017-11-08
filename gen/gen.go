@@ -291,27 +291,27 @@ type Logger interface {
 {{ range $key, $value := .LogLevels }}
 {{- if eq "true" (index $.LogStdCompatible $key)}}
 // {{ $key }} is the generated logger function to satisfy the interface
-func (l *logger) {{ $key }}(iface ...interface{}) {
+func (l *DefaultLogger) {{ $key }}(iface ...interface{}) {
 	l.print({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 
 // {{ $key }}f is the generated logger function to satisfy the interface
-func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
+func (l *DefaultLogger) {{ $key }}f(fmt string, iface ...interface{}) {
 	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
 }
 
 // {{ $key }}ln is the generated logger function to satisfy the interface
-func (l *logger) {{ $key }}ln(iface ...interface{}) {
+func (l *DefaultLogger) {{ $key }}ln(iface ...interface{}) {
 	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 {{ else }}
 // {{ $key }} is the generated logger function to satisfy the interface
-func (l *logger) {{ $key }}(iface ...interface{}) {
+func (l *DefaultLogger) {{ $key }}(iface ...interface{}) {
 	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 
 // {{ $key }}f is the generated logger function to satisfy the interface
-func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
+func (l *DefaultLogger) {{ $key }}f(fmt string, iface ...interface{}) {
 	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
 }
 {{- end }}

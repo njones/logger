@@ -21,30 +21,30 @@ import (
 var strMarshalError = "Static Marshaling Test Error"
 
 func withTime(t time.Time) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.ts = &t
 	}
 }
 
 func withTimeFormatted(str string) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.tsFormatted = str
 	}
 }
 
 func withStdErr(b *bytes.Buffer) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.stderr = b
 	}
 }
 
 func withStdOut(b *bytes.Buffer) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.stdout = b
 	}
 }
 
-func withFatal(l *logger) {
+func withFatal(l *DefaultLogger) {
 	l.fatal = func(i int) {}
 }
 

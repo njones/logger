@@ -90,21 +90,21 @@ var ifSlicePool = sync.Pool{
 // the internal deadline for timeout to a io.Writer
 var filteredWriteDeadline = 5 * time.Second
 
-// OptFunc are functions that add options to the *logger struct
-type OptFunc func(*logger)
+// OptFunc are functions that add options to the *DefaultLogger struct
+type OptFunc func(*DefaultLogger)
 
 // nilLogger is used by the logger to log to a black hole.
 type nilLogger struct{}
 
 // colorLogger is used to color a log line with a specific color
 type colorLogger struct {
-	*logger
+	*DefaultLogger
 
 	color string // the ESC string value
 }
 
-// logger is the struct that holds the main loging constructs
-type logger struct {
+// DefaultLogger is the struct that holds the main loging constructs
+type DefaultLogger struct {
 	sync.RWMutex
 	w io.Writer
 
@@ -137,7 +137,7 @@ func rtnLogLevelStr(pfx LogLevel) string {
 func New(options ...OptFunc) Logger {
 
 	// default logger values
-	l := &logger{
+	l := &DefaultLogger{
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 		marshal:  StdKVMarshal,
@@ -164,17 +164,17 @@ func New(options ...OptFunc) Logger {
 }
 
 // Suppress stops logging
-func (l *logger) Suppress() {
+func (l *DefaultLogger) Suppress() {
 	l.hide = true
 }
 
 // UnSuppress starts logging
-func (l *logger) UnSuppress() {
+func (l *DefaultLogger) UnSuppress() {
 	l.hide = false
 }
 
 // OnErr returns the internal logger if the error is not nil, otherwise it returns a nilLogger which won't do any logging. This is used for logging only if there is an error present.
-func (l *logger) OnErr(err error) Logger {
+func (l *DefaultLogger) OnErr(err error) Logger {
 	if err != nil {
 		return l
 	}
@@ -182,25 +182,25 @@ func (l *logger) OnErr(err error) Logger {
 }
 
 // Color overrides the default color
-func (l *logger) Color(color LogColor) Logger {
+func (l *DefaultLogger) Color(color LogColor) Logger {
 	return &colorLogger{l, color.ToESCColor()}
 
 }
 
 // NoColor removes color from the output
-func (l *logger) NoColor() Logger {
+func (l *DefaultLogger) NoColor() Logger {
 	return &colorLogger{l, NoESCColor}
 }
 
 // Field overrides the default color
-func (l *logger) Field(key string, value interface{}) Logger {
+func (l *DefaultLogger) Field(key string, value interface{}) Logger {
 	l.ctxkv[key] = value
 	return l
 }
 
 // Fields overrides the default color with key value pairs.
 // The KVMap function can be used to add values from a map
-func (l *logger) Fields(kvs ...keyValue) Logger {
+func (l *DefaultLogger) Fields(kvs ...keyValue) Logger {
 	for i := range kvs {
 		l.ctxkv[kvs[i].K] = kvs[i].V
 	}
@@ -208,22 +208,22 @@ func (l *logger) Fields(kvs ...keyValue) Logger {
 }
 
 // print the internal function that prints non-formatted logging
-func (l *logger) print(prefix LogLevel, color string, iface ...interface{}) {
+func (l *DefaultLogger) print(prefix LogLevel, color string, iface ...interface{}) {
 	l.printx(formatNone, prefix, color, "", iface...)
 }
 
 // printf the internal function that prints formatted logging
-func (l *logger) printf(prefix LogLevel, color string, format string, iface ...interface{}) {
+func (l *DefaultLogger) printf(prefix LogLevel, color string, format string, iface ...interface{}) {
 	l.printx(formatHave, prefix, color, format, iface...)
 }
 
 // println the internal function that prints logging with a newline
-func (l *logger) println(prefix LogLevel, color string, iface ...interface{}) {
+func (l *DefaultLogger) println(prefix LogLevel, color string, iface ...interface{}) {
 	l.printx(formatLine, prefix, color, "", iface...)
 }
 
 // printx is the internal function that prints the log line to the output writer(s)
-func (l *logger) printx(kind string, pfx LogLevel, color string, format string, iface ...interface{}) {
+func (l *DefaultLogger) printx(kind string, pfx LogLevel, color string, format string, iface ...interface{}) {
 
 	switch pfx {
 	case Level().Fatal:
@@ -409,7 +409,7 @@ func (l *logger) printx(kind string, pfx LogLevel, color string, format string, 
 }
 
 // HTTPMiddleware returns the standard HTTP handler middleware function that will capture headers for logging.
-func (l *logger) HTTPMiddleware(next http.Handler) http.Handler {
+func (l *DefaultLogger) HTTPMiddleware(next http.Handler) http.Handler {
 	// lazy initialize
 	if l.httpkv == nil {
 		l.httpkv = make(map[string]*string)

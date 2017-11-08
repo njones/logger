@@ -6,28 +6,28 @@ import (
 
 // WithOutput adds a new writer to the logging output
 func WithOutput(w io.Writer) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.output = append(l.output, w)
 	}
 }
 
 // WithFilteredStringOutput adds a new writer that is filtered by the function presented. This returns a func which takes the same input as the WithOutput function.
 func WithFilteredStringOutput(fn FilteredStringFunc, w io.Writer) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.filter = append(l.filter, &filteredStringWriter{w: w, fn: fn})
 	}
 }
 
 // WithFilteredByteOutput adds a new writer that is filtered by the function presented. This returns a func which takes the same input as the WithOutput function.
 func WithFilteredByteOutput(fn FilteredByteFunc, w io.Writer) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.filter = append(l.filter, &filteredByteWriter{w: w, fn: fn})
 	}
 }
 
 // WithHTTPHeader adds a HTTP header to be captured for the structured output
 func WithHTTPHeader(header string) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		// lazy initialize
 		if l.httpkv == nil {
 			l.httpkv = make(map[string]*string)
@@ -38,18 +38,18 @@ func WithHTTPHeader(header string) OptFunc {
 
 // WithKVMarshaler allows a custom marshaler for the structured logging. This follows the Marshaler standard
 func WithKVMarshaler(fn func(interface{}) ([]byte, error)) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.marshal = fn
 	}
 }
 
 // WithTimeAsUTC sets the logging time to be UTC, otherwise it is the same as the OS timezone
-func WithTimeAsUTC(l *logger) {
+func WithTimeAsUTC(l *DefaultLogger) {
 	l.tsIsUTC = true
 }
 
-// WithShortPrefix uses the three letter prefix
-func WithShortPrefix(l *logger) {
+// WithShortPrefix uses the three letter prefix instead of the word
+func WithShortPrefix(l *DefaultLogger) {
 	l.prefix = func(pfx LogLevel) string {
 		return "[" + pfx.Short() + "]"
 	}
@@ -57,7 +57,7 @@ func WithShortPrefix(l *logger) {
 
 // WithTimeFormat sets the logging time to be formatted using the Go time formatting options
 func WithTimeFormat(fmt string) OptFunc {
-	return func(l *logger) {
+	return func(l *DefaultLogger) {
 		l.tsFormat = fmt
 	}
 }
