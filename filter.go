@@ -11,9 +11,14 @@ type FilteredByteFunc func(*filteredByteWriter, []byte) []byte
 // FilteredStringFunc is the a function that takes a string and determines if it should be logged or not
 type FilteredStringFunc func(string) bool
 
-// Filter is an interface that determines if a filter should be completed
-type Filter interface {
+// FilterFlusher is an interface that determines if a filter should be completed
+type FilterFlusher interface {
 	Flush() bool
+}
+
+// FilterString is an interface that determines if a filter should take the raw data to filter on
+type FilterOn interface {
+	On(string)
 }
 
 // filteredWriter is a struct that wraps a writer that will filter out writes based on a passed in function
@@ -21,9 +26,11 @@ type filteredStringWriter struct {
 	w   io.Writer
 	fn  FilteredStringFunc
 	buf *bytes.Buffer
+
+	fs string
 }
 
-// Write makes this a writer interface. This will buffer writes until an error or the Done method is called.
+// Write makes this a writer interface. This will buffer writes until an error or the Flush method is called.
 func (fw *filteredStringWriter) Write(p []byte) (n int, err error) {
 	if fw.buf == nil {
 		fw.buf = new(bytes.Buffer)
@@ -31,9 +38,22 @@ func (fw *filteredStringWriter) Write(p []byte) (n int, err error) {
 	return fw.buf.Write(p)
 }
 
+// Raw takes external data to stringize and do the flush check on if there
+func (fw *filteredStringWriter) On(s string) {
+	fw.fs = s
+}
+
 // Flush makes this a Filter interface. This will flush and reset the buffer. It returns if anything was written or not
 func (fw *filteredStringWriter) Flush() bool {
 	defer fw.buf.Reset()
+
+	if fw.fs != "" {
+		if fw.fn(fw.fs) {
+			fw.w.Write(fw.buf.Bytes())
+			return true
+		}
+		return false
+	}
 
 	if fw.fn(fw.buf.String()) {
 		fw.w.Write(fw.buf.Bytes())
@@ -51,7 +71,7 @@ type filteredByteWriter struct {
 	buf *bytes.Buffer
 }
 
-// Write makes this a writer interface. This will buffer writes until an error or the Done method is called.
+// Write makes this a writer interface. This will buffer writes until an error or the Flush method is called.
 func (fw *filteredByteWriter) Write(p []byte) (n int, err error) {
 	if fw.buf == nil {
 		fw.buf = new(bytes.Buffer)

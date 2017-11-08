@@ -292,57 +292,27 @@ type Logger interface {
 {{- if eq "true" (index $.LogStdCompatible $key)}}
 // {{ $key }} is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}(iface ...interface{}) {
-	l.l.Lock() // locks in the color change
-	switch l.color {
-	case "":
-		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
-	}
-	l.print({{ $value }}, iface...)
-	l.l.Unlock()
+	l.print({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 
 // {{ $key }}f is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.l.Lock() // locks in the color change
-	switch l.color {
-	case "":
-		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
-	}
-	l.printf({{ $value }}, fmt, iface...)
-	l.l.Unlock()
+	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
 }
 
 // {{ $key }}ln is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}ln(iface ...interface{}) {
-	l.l.Lock() // locks in the color change
-	switch l.color {
-	case "":
-		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
-	}
-	l.println({{ $value }}, iface...)
-	l.l.Unlock()
+	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 {{ else }}
 // {{ $key }} is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}(iface ...interface{}) {
-	l.l.Lock() // locks in the color change
-	switch l.color {
-	case "":
-		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
-	}
-	l.println({{ $value }}, iface...)
-	l.l.Unlock()
+	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
 }
 
 // {{ $key }}f is the generated logger function to satisfy the interface
 func (l *logger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.l.Lock() // locks in the color change
-	switch l.color {
-	case "":
-		l.color = {{ index $.LogHasESCColors $key }}.ToESCColor()
-	}
-	l.printf({{ $value }}, fmt, iface...)
-	l.l.Unlock()
+	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
 }
 {{- end }}
 {{- end }}
@@ -392,4 +362,32 @@ func (l *nilLogger) {{ $key }}f(fmt string, iface ...interface{}){{ printf $kffm
 func (l *nilLogger) {{ $key }}ln(iface ...interface{}){{ printf $klnfmt "" }}{ return }
 {{- end }}
 
+{{ range $key, $value := .LogLevels }}
+{{- if eq "true" (index $.LogStdCompatible $key)}}
+// {{ $key }} is the generated colorLogger function to satisfy the interface
+func (l *colorLogger) {{ $key }}(iface ...interface{}) {
+	l.print({{ $value }}, l.color, iface...)
+}
+
+// {{ $key }}f is the generated colorLogger function to satisfy the interface
+func (l *colorLogger) {{ $key }}f(fmt string, iface ...interface{}) {
+	l.printf({{ $value }}, l.color, fmt, iface...)
+}
+
+// {{ $key }}ln is the generated colorLogger function to satisfy the interface
+func (l *colorLogger) {{ $key }}ln(iface ...interface{}) {
+	l.println({{ $value }}, l.color, iface...)
+}
+{{ else }}
+// {{ $key }} is the generated colorLogger function to satisfy the interface
+func (l *colorLogger) {{ $key }}(iface ...interface{}) {
+	l.println({{ $value }}, l.color, iface...)
+}
+
+// {{ $key }}f is the generated colorLogger function to satisfy the interface
+func (l *colorLogger) {{ $key }}f(fmt string, iface ...interface{}) {
+	l.printf({{ $value }}, l.color, fmt, iface...)
+}
+{{- end }}
+{{- end }}
 `))

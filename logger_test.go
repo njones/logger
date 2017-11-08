@@ -273,6 +273,34 @@ func TestFilteredStringOutput(t *testing.T) {
 	}
 }
 
+func TestFilteredStringOutput2(t *testing.T) {
+	want := "TEST \x1b[32m Info: This is a simple test that I keep \x1b[0m\n"
+	have := new(bytes.Buffer)
+
+	// This shows that we're looking at the data passed in and not including the time or color stuff
+	fn := func(s string) bool {
+		if strings.HasSuffix(s, "[1]") {
+			return false
+		}
+		if strings.HasPrefix(s, "[3]") {
+			return false
+		}
+		return true
+	}
+
+	l := New(WithFilteredStringOutput(fn, have), WithTimeFormat("TEST"))
+
+	l.Info("This is a simple test [1]")
+	l.Info("This is a simple test that I keep")
+	l.Infof("%s [%d]", "This is a simple test that I skip", 1)
+	l.Infof("[%d] %s", KV("skip", '⇨'), 3, "This is a simple test that I skip", KV("skip", '←'))
+	l.Info("[3] This is a simple test")
+
+	if want != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+	}
+}
+
 func TestFilteredByteOutput(t *testing.T) {
 	base := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
 	want := "TEST Info: This is a simple test [1] \nTEST Info: This is a simple test [2] \n"

@@ -36,7 +36,7 @@ type (
 	LogStyle int32
 )
 
-// The VT-100 escape codes for different formatting options
+// The VT-100 escape sequence for different formatting options
 // Note that the code in the comments are used in the gen.go file to generate the logger_generated.go file
 const (
 	ResetCode           = "\x1b[0m"
@@ -51,7 +51,7 @@ const (
 	Hidden                     // `gen.style:"\x1b[08m"`
 )
 
-// The color number of the escape sequence
+// The color number of the escape sequence, the sequence is dynamiclly generated
 // Note that the code in the comments are used in the gen.go file to generate the logger_generated.go file
 const (
 	Black   LogColor = iota + 30 // `gen.color:"\x1b[30m"`
@@ -90,16 +90,23 @@ var ifSlicePool = sync.Pool{
 // the internal deadline for timeout to a io.Writer
 var filteredWriteDeadline = 5 * time.Second
 
-// OptFunc are functions that add options to the *Logger struct
+// OptFunc are functions that add options to the *logger struct
 type OptFunc func(*logger)
 
 // nilLogger is used by the logger to log to a black hole.
 type nilLogger struct{}
 
+// colorLogger is used to color a log line with a specific color
+type colorLogger struct {
+	*logger
+
+	color string // the ESC string value
+}
+
 // logger is the struct that holds the main loging constructs
 type logger struct {
+	sync.RWMutex
 	w io.Writer
-	l sync.Mutex
 
 	ts          *time.Time
 	tsIsUTC     bool
@@ -107,7 +114,6 @@ type logger struct {
 	tsFormatted string // preformatted
 
 	hide   bool
-	color  string // the ESC string value
 	prefix func(LogLevel) string
 	output []io.Writer
 	filter []io.Writer
@@ -146,11 +152,12 @@ func New(options ...OptFunc) Logger {
 		opt(l)
 	}
 
+	// the defaut writer
+	l.w = l.stdout
+
 	// set up all of the output writers and filters
 	if len(l.output) > 0 || len(l.filter) > 0 {
 		l.w = io.MultiWriter(append(l.output, l.filter...)...)
-	} else {
-		l.w = l.stdout
 	}
 
 	return l
@@ -176,14 +183,13 @@ func (l *logger) OnErr(err error) Logger {
 
 // Color overrides the default color
 func (l *logger) Color(color LogColor) Logger {
-	l.color = color.ToESCColor()
-	return l
+	return &colorLogger{l, color.ToESCColor()}
+
 }
 
 // NoColor removes color from the output
 func (l *logger) NoColor() Logger {
-	l.color = NoESCColor
-	return l
+	return &colorLogger{l, NoESCColor}
 }
 
 // Field overrides the default color
@@ -202,183 +208,204 @@ func (l *logger) Fields(kvs ...keyValue) Logger {
 }
 
 // print the internal function that prints non-formatted logging
-func (l *logger) print(prefix LogLevel, iface ...interface{}) {
-	l.printx(formatNone, prefix, "", iface...)
+func (l *logger) print(prefix LogLevel, color string, iface ...interface{}) {
+	l.printx(formatNone, prefix, color, "", iface...)
 }
 
 // printf the internal function that prints formatted logging
-func (l *logger) printf(prefix LogLevel, format string, iface ...interface{}) {
-	l.printx(formatHave, prefix, format, iface...)
+func (l *logger) printf(prefix LogLevel, color string, format string, iface ...interface{}) {
+	l.printx(formatHave, prefix, color, format, iface...)
 }
 
 // println the internal function that prints logging with a newline
-func (l *logger) println(prefix LogLevel, iface ...interface{}) {
-	l.printx(formatLine, prefix, "", iface...)
+func (l *logger) println(prefix LogLevel, color string, iface ...interface{}) {
+	l.printx(formatLine, prefix, color, "", iface...)
 }
 
 // printx is the internal function that prints the log line to the output writer(s)
-func (l *logger) printx(kind string, pfx LogLevel, format string, iface ...interface{}) {
-
-	// check to see if we should be writing to the io.Writers for this logger
-	if !l.hide {
-		var kv = kvMapPool.Get().(map[string]interface{})
-
-		var ts time.Time
-		if l.ts == nil {
-			ts = time.Now()
-		} else {
-			ts = *l.ts
-		}
-
-		if l.tsIsUTC {
-			ts = ts.UTC()
-		}
-
-		var tsFormatted string
-		if l.tsFormatted != "" {
-			tsFormatted = l.tsFormatted
-		} else {
-			switch v := l.tsFormat; v {
-			case "":
-				// the standard  format
-				var n int
-				var buf = [...]byte{'J', 'a', 'n', '-', '1', '0', '-', '1', '9', '7', '0', ' ', '2', '4', ':', '0', '0', ':', '0', '0'}
-
-				// month-day-year
-				copy(buf[0:], ts.Month().String()[:3])
-				buf[3] = '-'
-				itoa(&buf, ts.Day(), -1, 4)
-				if ts.Day() > 9 {
-					n += 1
-				}
-				buf[5+n] = '-'
-				itoa(&buf, ts.Year(), 4, 6+n)
-				buf[10+n] = ' '
-
-				// time
-				itoa(&buf, ts.Hour(), 2, 11+n)
-				buf[13+n] = ':'
-				itoa(&buf, ts.Minute(), 2, 14+n)
-				buf[16+n] = ':'
-				itoa(&buf, ts.Second(), 2, 17+n)
-
-				tsFormatted = string(buf[:19+n]) // Jan-2-2006 15:04:05
-			default:
-				// this is much more memory and is slower than the std formatting
-				tsFormatted = ts.Format(l.tsFormat)
-			}
-		}
-
-		// pre-allocate the memory for all of the data needed in the slices
-		inlnif := ifSlicePool.Get().([]interface{})
-		switch {
-		case l.color == NoESCColor:
-			inlnif = append(inlnif, tsFormatted+" "+l.prefix(pfx))
-		default:
-			inlnif = append(inlnif, tsFormatted+" "+l.color+" "+l.prefix(pfx))
-		}
-
-		switch kind {
-		case formatNone:
-			inlnif = append(inlnif, " ")
-		}
-
-		defer func() {
-			for k := range kv {
-				delete(kv, k)
-			}
-			kvMapPool.Put(kv)
-
-			for i := range inlnif {
-				inlnif[i] = nil
-			}
-			inlnif = inlnif[:0]
-
-			ifSlicePool.Put(inlnif)
-		}()
-
-		// add any http keys to the internal structured kv logging map
-		for k, v := range l.httpkv {
-			kv[k] = *v
-		}
-
-		// add any context keys to the internal structured kv logging map
-		for k, v := range l.ctxkv {
-			kv[k] = v
-		}
-
-		// filter out all of the structured kv logging stucts and add to the map
-		for _, iv := range iface {
-			if val, ok := iv.(keyValue); ok {
-				kv[val.K] = val.V
-				continue
-			}
-			inlnif = append(inlnif, iv)
-		}
-
-		// add color codes
-		if l.color != "" && l.color != NoESCColor {
-			inlnif = append(inlnif, ResetCode)
-		}
-
-		// add kv with marshaled structured logging
-		if len(kv) > 0 {
-			// marshal the structred logging to the key=value representation. (usually JSON or k=v, style)
-			msh, err := l.marshal(kv)
-			if err != nil {
-				// logs error to stderr and dumps data, so you shouldn't lose any, but it won't be formatted correctly
-				fmt.Fprintln(l.stderr, "error marshaling:", err)
-				msh = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", kv))
-			}
-			if len(msh) > 0 {
-				inlnif = append(inlnif, string(msh))
-			}
-		}
-
-		if pfx == Level().Panic {
-			switch kind {
-			case formatNone:
-				panic(fmt.Sprint(inlnif...))
-			case formatHave:
-				panic(fmt.Sprintf("%s "+format+" %s\n", inlnif...))
-			case formatLine:
-				panic(fmt.Sprintln(inlnif...))
-			}
-		}
-
-		// send to all of the out io.Writers
-		switch kind {
-		case formatNone:
-			if _, err := fmt.Fprint(l.w, inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writing print to log:", err)
-			}
-		case formatHave:
-			if _, err := fmt.Fprintf(l.w, "%s "+format+" %s\n", inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writing printf to log:", err)
-			}
-		case formatLine:
-			if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
-				fmt.Fprintln(l.stderr, "error writing println to log:", err)
-			}
-		}
-
-		// flush the filtered writers
-		for _, out := range l.filter {
-			if fo, ok := out.(Filter); ok {
-				fo.Flush()
-			}
-		}
-
-		if l.color != NoESCColor {
-			l.color = "" // remove color, so we can be ready for the next one.
-		}
-	}
+func (l *logger) printx(kind string, pfx LogLevel, color string, format string, iface ...interface{}) {
 
 	switch pfx {
 	case Level().Fatal:
 		l.fatal(int(pfx))
 	}
 
+	// check to see if we should be writing to the io.Writers for this logger
+	if l.hide {
+		return
+	}
+
+	var kv = kvMapPool.Get().(map[string]interface{})
+
+	var ts time.Time
+	if l.ts == nil {
+		ts = time.Now()
+	} else {
+		ts = *l.ts
+	}
+
+	if l.tsIsUTC {
+		ts = ts.UTC()
+	}
+
+	var tsFormatted = l.tsFormatted
+	if tsFormatted == "" {
+		switch l.tsFormat {
+		case "":
+			// the standard  format
+			var n int
+			var buf = [...]byte{'J', 'a', 'n', '-', '1', '0', '-', '1', '9', '7', '0', ' ', '2', '4', ':', '0', '0', ':', '0', '0'}
+
+			// month-day-year
+			copy(buf[0:], ts.Month().String()[:3])
+			buf[3] = '-'
+			itoa(&buf, ts.Day(), -1, 4)
+			if ts.Day() > 9 {
+				n += 1
+			}
+			buf[5+n] = '-'
+			itoa(&buf, ts.Year(), 4, 6+n)
+			buf[10+n] = ' '
+
+			// time
+			itoa(&buf, ts.Hour(), 2, 11+n)
+			buf[13+n] = ':'
+			itoa(&buf, ts.Minute(), 2, 14+n)
+			buf[16+n] = ':'
+			itoa(&buf, ts.Second(), 2, 17+n)
+
+			tsFormatted = string(buf[:19+n]) // Jan-2-2006 15:04:05
+		default:
+			// this is much more memory and is slower than the std formatting
+			tsFormatted = ts.Format(l.tsFormat)
+		}
+	}
+
+	// pre-allocate the memory for all of the data needed in the slices
+	inlnif := ifSlicePool.Get().([]interface{})
+	switch {
+	case color == NoESCColor:
+		inlnif = append(inlnif, tsFormatted+" "+l.prefix(pfx))
+	default:
+		inlnif = append(inlnif, tsFormatted+" "+color+" "+l.prefix(pfx))
+	}
+
+	switch kind {
+	case formatNone:
+		inlnif = append(inlnif, " ")
+	}
+
+	defer func() {
+		for k := range kv {
+			delete(kv, k)
+		}
+		kvMapPool.Put(kv)
+
+		for i := range inlnif {
+			inlnif[i] = nil
+		}
+		inlnif = inlnif[:0]
+
+		ifSlicePool.Put(inlnif)
+	}()
+
+	// add any http keys to the internal structured kv logging map
+	for k, v := range l.httpkv {
+		kv[k] = *v
+	}
+
+	// add any context keys to the internal structured kv logging map
+	for k, v := range l.ctxkv {
+		kv[k] = v
+	}
+
+	// filter out all of the structured kv logging stucts and add to the map
+	var ifaceCutPoints []int
+	for i, iv := range iface {
+		if val, ok := iv.(keyValue); ok {
+			kv[val.K] = val.V
+			ifaceCutPoints = append(ifaceCutPoints, i)
+			continue
+		}
+		inlnif = append(inlnif, iv)
+	}
+
+	// add color codes
+	if color != "" && color != NoESCColor {
+		inlnif = append(inlnif, ResetCode)
+	}
+
+	// add kv with marshaled structured logging
+	if len(kv) > 0 {
+		// marshal the structred logging to the key=value representation. (usually JSON or k=v, style)
+		msh, err := l.marshal(kv)
+		if err != nil {
+			// logs error to stderr and dumps data, so you shouldn't lose any, but it won't be formatted correctly
+			fmt.Fprintln(l.stderr, "error marshaling:", err)
+			msh = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", kv))
+		}
+		if len(msh) > 0 {
+			inlnif = append(inlnif, string(msh))
+		}
+	}
+
+	if pfx == Level().Panic {
+		switch kind {
+		case formatNone:
+			panic(fmt.Sprint(inlnif...))
+		case formatHave:
+			panic(fmt.Sprintf("%s "+format+" %s\n", inlnif...))
+		case formatLine:
+			panic(fmt.Sprintln(inlnif...))
+		}
+	}
+
+	// send to all of the out io.Writers wait until they have been written to
+	// to move on, otherwise we'll over write some stuff...
+	l.RWMutex.Lock()
+	switch kind {
+	case formatNone:
+		if _, err := fmt.Fprint(l.w, inlnif...); err != nil {
+			fmt.Fprintln(l.stderr, "error writing print to log:", err)
+		}
+	case formatHave:
+		if _, err := fmt.Fprintf(l.w, "%s "+format+" %s\n", inlnif...); err != nil {
+			fmt.Fprintln(l.stderr, "error writing printf to log:", err)
+		}
+	case formatLine:
+		if _, err := fmt.Fprintln(l.w, inlnif...); err != nil {
+			fmt.Fprintln(l.stderr, "error writing println to log:", err)
+		}
+	}
+	l.RWMutex.Unlock()
+
+	// grab the raw data that we're using
+	var fString string
+	if len(l.filter) > 0 {
+		for j, k := range ifaceCutPoints {
+			i := k - j
+			iface = append(iface[:i], iface[i+1:]...)
+		}
+		if kind == formatHave {
+			fString = fmt.Sprintf(format, iface...)
+		} else {
+			fString = fmt.Sprint(iface...)
+		}
+	}
+
+	// flush the filtered writers
+	for _, out := range l.filter {
+		if fo, ok := out.(FilterFlusher); ok {
+			if fs, ok := out.(FilterOn); ok {
+				fs.On(fString)
+			}
+			fo.Flush()
+		}
+	}
+
+	if color != NoESCColor {
+		color = "" // remove color, so we can be ready for the next one.
+	}
 }
 
 // HTTPMiddleware returns the standard HTTP handler middleware function that will capture headers for logging.
