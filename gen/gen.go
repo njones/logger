@@ -1,186 +1,315 @@
+// Logger Method Gen is a tool to automate the creation of methods that satisfy the Logger
+// interface. It looks for constants of type logLevel for which to derive the name of
+// the methods that can be generated in the format:
+//
+// const LevelPrint logLevel = iota //`short:"INF" long:"Info" color:"green"`
+//
+// will produce:
+//
+// func (*baseLogger) Print(v ...interface{}) {}
+// func (*baseLogger) Printf(format string, v ...interface{}) {}
+// func (*baseLogger) Println(v ...interface{}) {}
+//
+// func (ll logLevel) ToString(kind levelType) string {
+// 	switch kind {
+// 	case LevelLongStr:
+// 		switch ll {
+// 		case LevelPrint:
+// 			return "Info: "
+// 		}
+// 	case LevelShortStr:
+// 		switch ll {
+// 		case LevelPrint:
+// 			return "INF "
+// 		}
+// 	case LevelShortBracketStr:
+// 		switch ll {
+// 		case LevelPrint:
+// 			return "[INF] "
+// 		}
+// 	}
+//
 package main
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"log"
 	"os"
 	"os/exec"
-	"regexp"
+	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 )
 
-// gen.go generates the logger functions
+type logLevelData struct {
+	Raw      string
+	Constant string
+	Level    string
+	Short    string
+	Long     string
+	Color    string
 
-var genFileIn = "logger_generated.go"
-var genFileOut = "logger.go"
+	AsPrint   bool
+	AsPrintf  bool
+	AsPrintln bool
+}
 
-func minus(a, b int) int { return a - b }
+type escStrData struct {
+	Raw      string
+	Name     string
+	Value    int
+	EscValue string
+}
+
+var escs = map[string]map[string]escStrData{
+	"colorType":  map[string]escStrData{},
+	"formatType": map[string]escStrData{},
+}
+var loglevels []logLevelData
+var leveltypes []string
 
 func main() {
-	lf, err := os.Create(genFileIn)
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, "../logger.go", nil, parser.ParseComments)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	gendFile, err := os.Create("../logger_generated.go")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer gendFile.Close()
 	defer func() {
-		cmd := exec.Command("go", "fmt", genFileIn)
+		cmd := exec.Command("go", "fmt", "../logger_generated.go")
 		err := cmd.Run()
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println("go code formatted...")
+		log.Println("go Logger code generated and formatted.")
 	}()
-	defer lf.Close()
 
-	fset := token.NewFileSet() // positions are relative to fset
-	f, err := parser.ParseFile(fset, genFileOut, nil, parser.ParseComments)
+	gendTestFile, err := os.Create("../logger_generated_test.go")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer gendTestFile.Close()
 
-	// Create an ast.CommentMap from the ast.File's comments.
-	// This helps keeping the association between comments
-	// and AST nodes.
-	cmap := ast.NewCommentMap(fset, f, f.Comments)
+	ast.Walk(VisitorFunc(FindTypes), node)
 
-	internal := struct {
-		Timestamp        time.Time
-		LogLevels        map[string]uint
-		LogLevelsShort   map[string]uint
-		LogColors        map[string]string
-		LogHasESCColors  map[string]string
-		LogStdCompatible map[string]string
-		LogAlias         map[string]bool
+	genTemplate.Execute(gendFile, struct {
+		Timestamp  time.Time
+		Escs       map[string]map[string]escStrData
+		Loglevels  []logLevelData
+		LevelTypes []string
 	}{
-		Timestamp:        time.Now().UTC(),
-		LogLevels:        make(map[string]uint),
-		LogLevelsShort:   make(map[string]uint),
-		LogColors:        make(map[string]string),
-		LogHasESCColors:  make(map[string]string),
-		LogStdCompatible: make(map[string]string),
-		LogAlias:         make(map[string]bool),
-	}
+		Timestamp:  time.Now(),
+		Escs:       escs,
+		Loglevels:  loglevels,
+		LevelTypes: leveltypes,
+	})
 
-	rx := regexp.MustCompile("//\\s+`(.*)`")
-
-	for kk, vv := range cmap {
-
-		if val, ok := kk.(*ast.ValueSpec); ok {
-
-			foundComment := rx.FindAllStringSubmatch(vv[0].List[0].Text, 1)
-			if len(foundComment) > 0 && len(foundComment[0]) > 1 {
-				commentTag := foundComment[0][1]
-				keyvals := strings.Split(commentTag, " ")
-				for _, kv := range keyvals {
-					kvs := strings.Split(kv, ":")
-					k := kvs[0]
-					v := strings.Trim(kvs[1], `"`)
-
-					if k == "gen.color" {
-						internal.LogColors[val.Names[0].Name] = v
-					}
-				}
-			}
-		}
-
-		if val, ok := kk.(*ast.Field); ok {
-
-			foundComment := rx.FindAllStringSubmatch(vv[0].List[0].Text, 1)
-			if len(foundComment) > 0 && len(foundComment[0]) > 1 {
-				var wait sync.WaitGroup
-
-				colorCh := make(chan string, 1)
-				commentTag := foundComment[0][1]
-				keyvals := strings.Split(commentTag, " ")
-				for _, kv := range keyvals {
-					kvs := strings.Split(kv, ":")
-					k := strings.TrimSpace(kvs[0])
-					v := strings.Trim(strings.TrimSpace(kvs[1]), `"`)
-
-					if k == "gen.show" {
-						internal.LogHasESCColors[val.Names[0].Name] = v
-						colorCh <- v
-					}
-
-					if k == "gen.stdlog.compat" {
-						vs := strings.Split(v, ",")
-						if len(vs) > 1 {
-							for i := 1; i < len(vs); i++ {
-								wait.Add(1)
-								// this is in a go routine so it can come before or after
-								go func(j int) {
-									wait.Done()
-									internal.LogHasESCColors[vs[j]] = <-colorCh
-								}(i)
-							}
-						}
-					}
-				}
-				wait.Wait()
-			}
-		}
-
-		if val, ok := kk.(*ast.GenDecl); ok {
-
-			if val.Tok == token.TYPE {
-				if val.Specs[0].(*ast.TypeSpec).Name.Name == "level" {
-					for k3, v3 := range val.Specs[0].(*ast.TypeSpec).Type.(*ast.StructType).Fields.List {
-
-						var short, alias string
-						foundComment := rx.FindAllStringSubmatch(v3.Comment.List[0].Text, 1)
-						if len(foundComment) > 0 && len(foundComment[0]) > 1 {
-							commentTag := foundComment[0][1]
-							keyvals := strings.Split(commentTag, " ")
-							for _, kv := range keyvals {
-								kvs := strings.Split(kv, ":")
-								k := strings.TrimSpace(kvs[0])
-								v := strings.Trim(strings.TrimSpace(kvs[1]), `"`)
-
-								if k == "gen.short" {
-									short = v
-								}
-
-								if k == "gen.alias" {
-									alias = v
-								}
-
-								if k == "gen.stdlog.compat" {
-									vs := strings.Split(v, ",")
-									if len(vs) == 1 {
-										internal.LogStdCompatible[v3.Names[0].Name] = vs[0]
-									} else {
-										for i := 1; i < len(vs); i++ {
-											internal.LogStdCompatible[vs[i]] = vs[0]
-										}
-									}
-								}
-							}
-						}
-
-						internal.LogLevels[v3.Names[0].Name] = 1 << uint(k3)
-						internal.LogLevelsShort[short] = 1 << uint(k3)
-
-						if alias != "" {
-							internal.LogLevels[alias] = 1 << uint(k3)
-							internal.LogLevelsShort[short] = 1 << uint(k3)
-							internal.LogAlias[alias] = true
-						}
-					}
-				}
-			}
-		}
-	}
-
-	err = packageTemplate.Execute(lf, internal)
-	log.Println("Done:", err)
+	genTestTemplate.Execute(gendTestFile, struct {
+		Timestamp  time.Time
+		Escs       map[string]map[string]escStrData
+		Loglevels  []logLevelData
+		LevelTypes []string
+	}{
+		Timestamp:  time.Now(),
+		Escs:       escs,
+		Loglevels:  loglevels,
+		LevelTypes: leveltypes,
+	})
 }
 
-var funcMap = template.FuncMap{"minus": minus}
-var packageTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`// go generate
+type VisitorFunc func(n ast.Node) ast.Visitor
+
+func (f VisitorFunc) Visit(n ast.Node) ast.Visitor { return f(n) }
+
+func FindTypes(n ast.Node) ast.Visitor {
+
+	var (
+		currType    string
+		currComment string
+		currValue   string
+	)
+
+	var val int
+	var err error
+
+	switch n := n.(type) {
+	case *ast.Package:
+		return VisitorFunc(FindTypes)
+	case *ast.File:
+		return VisitorFunc(FindTypes)
+	case *ast.GenDecl:
+		if n.Tok == token.CONST {
+			for _, spec := range n.Specs {
+				vspec := spec.(*ast.ValueSpec)
+				for _, name := range vspec.Names {
+					if vspec.Type != nil {
+						ident, ok := vspec.Type.(*ast.Ident)
+						if ok {
+							currType = ident.Name
+						}
+
+					}
+					if comment := vspec.Comment; comment != nil {
+						for _, commGrp := range comment.List {
+							currComment = commGrp.Text // assume only one comment
+						}
+					}
+
+					if values := vspec.Values; values != nil {
+						for _, expression := range values {
+							currValue = exprToStr(expression)
+						}
+					}
+
+					raw := fmt.Sprintf("%s (%s:%q) = %s\n", name.Name, currType, currComment, currValue)
+
+					switch currType {
+					case "levelType":
+						leveltypes = append(leveltypes, name.Name)
+					case "logLevel":
+						cMap := commTagToMap(currComment)
+						level := strings.TrimPrefix(name.Name, "Level")
+						if _, ok := cMap["long"]; !ok {
+							cMap["long"] = level
+						}
+						p, f, ln := true, true, true
+						if fnValues, ok := cMap["fn"]; ok {
+							p, f, ln = false, false, false
+							for _, fnVal := range strings.Split(fnValues, ",") {
+								switch fnVal {
+								case "-":
+									continue // keep them all false same as "empty"
+								case "p":
+									p = true
+								case "f":
+									f = true
+								case "ln":
+									ln = true
+								}
+							}
+						}
+						lld := logLevelData{
+							Raw:       raw,
+							Constant:  name.Name,
+							Level:     level,
+							Short:     cMap["short"],
+							Long:      cMap["long"],
+							Color:     cMap["color"],
+							AsPrint:   p,
+							AsPrintf:  f,
+							AsPrintln: ln,
+						}
+						loglevels = append(loglevels, lld)
+					case "formatType", "colorType":
+						if currValue != "" {
+							val, err = strconv.Atoi(currValue)
+							if err != nil {
+								// this assumes a "iota + x" or "iota << 1" is what is breaking it
+								strVal := strings.Split(currValue, " ")
+								val, err = strconv.Atoi(strVal[len(strVal)-1])
+								if err != nil {
+									log.Printf("second err parsing: %v\n", currValue)
+									continue
+								}
+							}
+						} else {
+							val++
+						}
+
+						if name.Name == "_" {
+							continue
+						}
+
+						var valEscStr string
+						if val != 255 {
+							valEscStr = fmt.Sprintf(`\x1b[%dm`, val)
+						}
+						esd := escStrData{
+							Raw:      "",
+							Name:     name.Name,
+							Value:    val,
+							EscValue: valEscStr,
+						}
+						escs[currType][name.Name] = esd
+					}
+
+					currComment = ""
+					currValue = ""
+
+				}
+			}
+			return VisitorFunc(FindTypes)
+		}
+	}
+	return nil
+}
+
+func commTagToMap(s string) map[string]string {
+	m := make(map[string]string)
+
+	// the following code assumes the tags will not
+	// have a space inside the quoted values
+	s = strings.TrimPrefix(s, "//")
+	s = strings.Trim(s, "`")
+	ss := strings.Split(s, " ")
+	for _, v := range ss {
+		kv := strings.Split(v, ":")
+		if len(kv) != 2 {
+			log.Printf("%q", s)
+			continue
+		}
+		m[kv[0]] = strings.Trim(kv[1], `"`)
+	}
+	return m
+}
+
+func exprToStr(a ast.Expr) (out string) {
+	switch vv := a.(type) {
+	case *ast.Ident:
+		if vv.Name == "iota" {
+			return "0"
+		}
+		return vv.Name
+	case *ast.UnaryExpr:
+		x := exprToStr(vv.X)
+		return vv.Op.String() + x
+	case *ast.BasicLit:
+		return vv.Value
+	case *ast.BinaryExpr:
+		x := exprToStr(vv.X)
+		y := exprToStr(vv.Y)
+		return x + " " + vv.Op.String() + " " + y
+	}
+	return fmt.Sprintf("%T - %#[1]v", a)
+}
+
+func levelTypeStr(a string, b logLevelData) string {
+	switch a {
+	case "LevelLongStr":
+		return b.Long + ":"
+	case "LevelShortStr":
+		return b.Short
+	case "LevelShortBracketStr":
+		return "[" + b.Short + "]"
+	}
+	return "-unknown-"
+}
+
+func colorStr(p, s string) string {
+	return p + "Color" + strings.Title(s)
+}
+
+var funcMap = template.FuncMap{"lt_str": levelTypeStr, "color": colorStr}
+var genTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// go generate
 // GENERATED BY THE COMMAND ABOVE; DO NOT EDIT THIS FILE
 // ~~ This file is not generated by hand ~~
 // ~~ generated on: {{ .Timestamp }} ~~
@@ -188,206 +317,276 @@ var packageTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`// go
 package logger
 
 import (
-	"net/http"
+	"sync"
 )
 
-// String is the string representation of the color
-func (lc LogColor) String() string {
-	switch lc {
-	{{-  range $key, $value := .LogColors }}
-	case {{ $key }}:
-		return "{{ $key }}"
-	{{- end }}
-	}
-
-	return "unknown"
-}
-
-// ToESCColor is the escape string representation of the color int32 number
-func (lc LogColor) ToESCColor() string {
-	switch lc {
-	{{-  range $key, $value := .LogColors }}
-	case {{ $key }}:
-		return "{{ $value }}"
-	{{- end }}
-	}
-
-	return "0"
-}
-
-// Level returns the log level used
-func Level() (lvl level) {
-{{-  range $key, $value := .LogLevels }}
-{{- if ne true (index $.LogAlias $key) }}
-	lvl.{{ $key }} = {{ $value }}
-{{- end }}
-{{- end }}
-	return lvl
-}
-
-// String is the string representation of the log level
-func (ll LogLevel) String() string {
-	switch ll {
-	{{-  range $key, $value := .LogLevels }}
-	{{- if ne true (index $.LogAlias $key) }}
-	case {{ $value }}:
-		return "{{ $key }}"
-	{{- end }}
-	{{- end }}
-	}
-
-	return "unknown"
-}
-
-// StringWithColon is the string representation of the log level with trailing colon
-func (ll LogLevel) StringWithColon() string {
-	switch ll {
-	{{-  range $key, $value := .LogLevels }}
-	{{- if ne true (index $.LogAlias $key) }}
-	case {{ $value }}:
-		return "{{ $key }}:"
-	{{- end }}
-	{{- end }}
-	}
-
-	return "unknown"
-}
-
-// Short is the short three letter abbreviation of the log level
-func (ll LogLevel) Short() string {
-	switch ll {
-	{{-  range $key, $value := .LogLevelsShort }}
-	{{- if ne true (index $.LogAlias $key) }}
-	case {{ $value }}:
-		return "{{ $key }}"
-	{{- end }}
-	{{- end }}
-	}
-
-	return "unknown"
-}
-
-// Logger is the main interface that is presented as a logger
+// Logger the main interface
 type Logger interface {
-	Color(LogColor) Logger
-	NoColor() Logger
+{{- range $idx, $value := .Loglevels  }}
+{{- if $value.AsPrint }}
+	{{$value.Level}}(...interface{})
+{{- end -}}
+{{- if $value.AsPrintf }}
+	{{$value.Level}}f(string, ...interface{})
+{{- end -}}
+{{- if $value.AsPrintln }}
+	{{$value.Level}}ln(...interface{})
+{{- end -}}
+{{end}}
+	Color(colorType) Logger
 	Field(string, interface{}) Logger
-	Fields(...keyValue) Logger
-	HTTPMiddleware(next http.Handler) http.Handler
+	Fields(map[string]interface{}) Logger
+	NoColor() Logger
 	OnErr(error) Logger
-	Suppress()
-	UnSuppress()
-{{ range $key, $value := .LogLevels }}
-{{- if eq "true" (index $.LogStdCompatible $key)}}
-    {{ $key }}(...interface{})
-	{{ $key }}f(string, ...interface{})
-	{{ $key }}ln(...interface{})
-{{- else }}
-	{{ $key }}(...interface{})
-	{{ $key }}f(string, ...interface{})
-{{- end }}
-{{- end }}
-}
-{{ range $key, $value := .LogLevels }}
-{{- if eq "true" (index $.LogStdCompatible $key)}}
-// {{ $key }} is the generated logger function to satisfy the interface
-func (l *DefaultLogger) {{ $key }}(iface ...interface{}) {
-	l.print({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
+	Suppress(logLevel) Logger
 }
 
-// {{ $key }}f is the generated logger function to satisfy the interface
-func (l *DefaultLogger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
+func (ll logLevel) ToString(kind levelType) string {
+	switch kind {
+	{{- range $idx1, $value1 := .LevelTypes}}
+	case {{$value1}}:
+		switch ll {
+		{{- range $idx2, $value2 := $.Loglevels  }}
+		case {{$value2.Constant}}:
+			return "{{lt_str $value1 $value2}} "
+		{{- end}}
+		}
+	{{- end}}
+	}
+	return "unknown"
 }
 
-// {{ $key }}ln is the generated logger function to satisfy the interface
-func (l *DefaultLogger) {{ $key }}ln(iface ...interface{}) {
-	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
-}
-{{ else }}
-// {{ $key }} is the generated logger function to satisfy the interface
-func (l *DefaultLogger) {{ $key }}(iface ...interface{}) {
-	l.println({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), iface...)
+func (l *baseLogger) levelStr(ll logLevel) string {
+	return ll.ToString(l.logLevel)
 }
 
-// {{ $key }}f is the generated logger function to satisfy the interface
-func (l *DefaultLogger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.printf({{ $value }}, {{ index $.LogHasESCColors $key }}.ToESCColor(), fmt, iface...)
+{{ range $idx, $value := .Loglevels }}
+{{ if $value.AsPrint }}
+func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
+	if l.skip&{{$value.Constant}} != 0 {
+		return
+	}
+	ctx := context{
+		is:          AsPrint,
+		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
+		level:       {{$value.Constant}},
+		levelStr:    l.levelStr({{$value.Constant}}),
+		values:      v,
+		wg:          &sync.WaitGroup{},
+	}
+
+	if l.color == UnkColor {
+		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	}
+
+	for k, val := range l.kv {
+		if ctx.kvMap == nil {
+			ctx.kvMap = make(map[string]interface{})
+		}
+		ctx.kvMap[k] = val
+	}
+	for i, val := range v {
+		if f, ok := val.(KVStruct); ok {
+			if ctx.kvMap == nil {
+				ctx.kvMap = make(map[string]interface{})
+			}
+			ctx.kvMap[f.key] = f.value
+			v[i] = ""
+		}
+	}
+
+	ctx.wg.Add(1)
+	l.to <- ctx
+	ctx.wg.Wait()
 }
-{{- end }}
-{{- end }}
+{{ end }}
+{{ if $value.AsPrintf }}
+func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
+	if l.skip&{{$value.Constant}} != 0 {
+		return
+	}
+	ctx := context{
+		is:          AsPrintf,
+		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		formatStr:   format,
+		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
+		level:       {{$value.Constant}},
+		levelStr:    l.levelStr({{$value.Constant}}),
+		values:      make([]interface{}, 0, len(v) * 2),
+		wg:          &sync.WaitGroup{},
+	}
 
-// Color is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) Color(x LogColor) Logger { return l }
+	if l.color == UnkColor {
+		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	}
 
-// NoColor is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) NoColor() Logger { return l }
+	for k, val := range l.kv {
+		if ctx.kvMap == nil {
+			ctx.kvMap = make(map[string]interface{})
+		}
+		ctx.kvMap[k] = val
+	}
+	for i, val := range v {
+		if f, ok := val.(KVStruct); ok {
+			if ctx.kvMap == nil {
+				ctx.kvMap = make(map[string]interface{})
+			}
+			ctx.kvMap[f.key] = f.value
+			continue
+		}
+		ctx.values = append(ctx.values, v[i])
+	}
 
-// Field is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) Field(s string, iface interface{}) Logger {
-	return l
+	ctx.wg.Add(1)
+	l.to <- ctx
+	ctx.wg.Wait()
 }
+{{ end }}
+{{ if $value.AsPrintln }}
+func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
+	if l.skip&{{$value.Constant}} != 0 {
+		return
+	}
+	ctx := context{
+		is:          AsPrintln,
+		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
+		level:       {{$value.Constant}},
+		levelStr:    l.levelStr({{$value.Constant}}),
+		values:      make([]interface{}, 0, len(v) * 2),
+		wg:          &sync.WaitGroup{},
+	}
 
-// Fields is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) Fields(kv ...keyValue) Logger {
-	return l
+	if l.color == UnkColor {
+		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	}
+
+	for k, val := range l.kv {
+		if ctx.kvMap == nil {
+			ctx.kvMap = make(map[string]interface{})
+		}
+		ctx.kvMap[k] = val
+	}
+	var sp = " "
+	for i, val := range v {
+		if f, ok := val.(KVStruct); ok {
+			if ctx.kvMap == nil {
+				ctx.kvMap = make(map[string]interface{})
+			}
+			ctx.kvMap[f.key] = f.value
+			continue
+		}
+		if i == 0 {
+			ctx.values = append(ctx.values, v[i])
+		} else {
+			ctx.values = append(ctx.values, []interface{}{sp, v[i]}...)
+		}
+	}
+
+	ctx.wg.Add(1)
+	l.to <- ctx
+	ctx.wg.Wait()
 }
+{{- end -}}
+{{ end}}
 
-// HTTPMiddleware is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) HTTPMiddleware(next http.Handler) (r http.Handler) {
-	return next
+{{- range $idx, $value := .Loglevels }}
+{{- if $value.AsPrint }}
+func (l nilLogger) {{$value.Level}}(v ...interface{})                 {}
+{{- end -}}
+{{- if $value.AsPrintf }}
+func (l nilLogger) {{$value.Level}}f(format string, v ...interface{}) {}
+{{- end -}}
+{{- if $value.AsPrintln }}
+func (l nilLogger) {{$value.Level}}ln(v ...interface{})               {}
+{{- end -}}
+{{- end}}
+func (l nilLogger) Color(colorType) Logger                 { return l }
+func (l nilLogger) Field(string, interface{}) Logger       { return l }
+func (l nilLogger) Fields(map[string]interface{}) Logger   { return l }
+func (l nilLogger) NoColor() Logger                        { return l }
+func (l nilLogger) OnErr(error) Logger                     { return l }
+func (l nilLogger) Suppress(logLevel) Logger               { return l }
+
+
+{{ range $key, $value1 := .Escs}}
+func (t {{$key}}) ESCStr() string {
+	switch t {
+	{{- range $idx, $value2 := $value1}}
+	case {{$value2.Name}}:
+		return "{{$value2.EscValue}}"
+	{{- end}}
+	}
+	return "\x1b[0munknown"
 }
+{{end}}
+`))
 
-// OnErr is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) OnErr(x error) Logger    { return l }
+var genTestTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// go generate
+	// GENERATED BY THE COMMAND ABOVE; DO NOT EDIT THIS FILE
+	// GENERATED ON: {{ .Timestamp }}
 
-// Suppress is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) Suppress()               {}
+	package logger
 
-// UnSuppress is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) UnSuppress()             {}
+	import (
+		"testing"
+		"bytes"
+	)
 
-{{- range $key, $value := .LogLevels }}
-{{- $klen := (minus 20 (len $key)) }}{{- $kfmt := printf "%%%ds" $klen }}
-{{- $kflen := (minus 7 (len $key)) }}{{- $kffmt := printf "%%%ds" $kflen }}
-{{- $klnlen := (minus 6 (len $key)) }}{{- $klnfmt := printf "%%%ds" $klnlen }}
+	{{ range $idx, $value := .Loglevels }}
+	{{- if and $value.AsPrint (ne $value.Long "Panic")}}
+	{{- $colorType := (color "" $value.Color) -}}
+	func Test{{$value.Level}}(t *testing.T) {
+		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
-// {{ $key }} is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) {{ $key }}(iface ...interface{}){{ printf $kfmt "" }}{ return }
+		have := new(bytes.Buffer)
+		l := New(WithOutput(have), WithTimeText("TEST"))
+		l.{{$value.Level}}("This ", "is ", "an ", "automated ", "test")
 
-// {{ $key }}f is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) {{ $key }}f(fmt string, iface ...interface{}){{ printf $kffmt "" }}{ return }
+		if want != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+		}
+	}
 
-// {{ $key }}ln is the nilLogger function to satisfy the interface. It does nothing.
-func (l *nilLogger) {{ $key }}ln(iface ...interface{}){{ printf $klnfmt "" }}{ return }
-{{- end }}
+	func Test{{$value.Level}}f(t *testing.T) {
+		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
-{{ range $key, $value := .LogLevels }}
-{{- if eq "true" (index $.LogStdCompatible $key)}}
-// {{ $key }} is the generated colorLogger function to satisfy the interface
-func (l *colorLogger) {{ $key }}(iface ...interface{}) {
-	l.print({{ $value }}, l.color, iface...)
-}
+		have := new(bytes.Buffer)
+		l := New(WithOutput(have), WithTimeText("TEST"))
+		l.{{$value.Level}}f("This is an %s test", "automated")
 
-// {{ $key }}f is the generated colorLogger function to satisfy the interface
-func (l *colorLogger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.printf({{ $value }}, l.color, fmt, iface...)
-}
+		if want != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+		}
+	}
 
-// {{ $key }}ln is the generated colorLogger function to satisfy the interface
-func (l *colorLogger) {{ $key }}ln(iface ...interface{}) {
-	l.println({{ $value }}, l.color, iface...)
-}
-{{ else }}
-// {{ $key }} is the generated colorLogger function to satisfy the interface
-func (l *colorLogger) {{ $key }}(iface ...interface{}) {
-	l.println({{ $value }}, l.color, iface...)
-}
+	func Test{{$value.Level}}ln(t *testing.T) {
+		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
-// {{ $key }}f is the generated colorLogger function to satisfy the interface
-func (l *colorLogger) {{ $key }}f(fmt string, iface ...interface{}) {
-	l.printf({{ $value }}, l.color, fmt, iface...)
-}
-{{- end }}
-{{- end }}
+		have := new(bytes.Buffer)
+		l := New(WithOutput(have), WithTimeText("TEST"))
+		l.{{$value.Level}}ln("This", "is", "an", "automated", "test")
+
+		if want != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+		}
+	}
+
+	func TestNilLogger{{$value.Level}}(t *testing.T) {
+		l := new(nilLogger)
+		l.{{$value.Level}}("does", "not", "work")
+	}
+	
+	func TestNilLogger{{$value.Level}}f(t *testing.T) {
+		l := new(nilLogger)
+		l.{{$value.Level}}f("%s %s %s", "does", "not", "work")
+	}
+
+	func TestNilLogger{{$value.Level}}ln(t *testing.T) {
+		l := new(nilLogger)
+		l.{{$value.Level}}ln("does", "not", "work")
+	}
+	{{ end }}
+	{{ end }}
 `))

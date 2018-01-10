@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"log"
 	"math/rand"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,31 +17,26 @@ import (
 
 var strMarshalError = "Static Marshaling Test Error"
 
-func withTime(t time.Time) OptFunc {
-	return func(l *DefaultLogger) {
-		l.ts = &t
-	}
-}
-
-func withTimeFormatted(str string) OptFunc {
-	return func(l *DefaultLogger) {
-		l.tsFormatted = str
-	}
-}
-
-func withStdErr(b *bytes.Buffer) OptFunc {
-	return func(l *DefaultLogger) {
+func withStdErr(b io.Writer) optFunc {
+	return func(l *baseLogger) {
 		l.stderr = b
 	}
 }
 
-func withStdOut(b *bytes.Buffer) OptFunc {
-	return func(l *DefaultLogger) {
+// WithTime overwrites the current timestamp with a static time stamp
+func withTime(ts time.Time) optFunc {
+	return func(l *baseLogger) {
+		l.ts = &ts
+	}
+}
+
+func withStdOut(b *bytes.Buffer) optFunc {
+	return func(l *baseLogger) {
 		l.stdout = b
 	}
 }
 
-func withFatal(l *DefaultLogger) {
+func withFatal(l *baseLogger) {
 	l.fatal = func(i int) {}
 }
 
@@ -55,21 +47,21 @@ func errorMarshal(i interface{}) ([]byte, error) {
 func TestMultipleOutput(t *testing.T) {
 
 	want := []string{
-		"TEST \x1b[32m Info: This is a test \x1b[0m\n",
-		"TEST \x1b[32m Info: This is a test \x1b[0m\n",
-		"TEST \x1b[33m Warn: This is a test \x1b[0m\n",
-		"TEST \x1b[31m Error: This is a test \x1b[0m\n",
-		"TEST \x1b[36m Debug: This is a test \x1b[0m\n",
-		"TEST \x1b[34m Trace: This is a test \x1b[0m\n",
-		"TEST \x1b[31m Fatal: This is a test \x1b[0m\n",
-		"TEST \x1b[35m Info: This is a test \x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a test\x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a test\x1b[0m\n",
+		"TEST \x1b[33mWarn: This is a test\x1b[0m\n",
+		"TEST \x1b[35mError: This is a test\x1b[0m\n",
+		"TEST \x1b[36mDebug: This is a test\x1b[0m\n",
+		"TEST \x1b[34mTrace: This is a test\x1b[0m\n",
+		"TEST \x1b[31mFatal: This is a test\x1b[0m\n",
+		"TEST \x1b[35mInfo: This is a test\x1b[0m\n",
 	}
 
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), withTimeFormatted("TEST"), withFatal)
-	for i, lg := range []tt{l.Println, l.Info, l.Warn, l.Error, l.Debug, l.Trace, l.Fatalln} {
+	l := New(WithOutput(have), WithTimeText("TEST"))
+	for i, lg := range []tt{l.Println, l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
 		have.Reset()
 		lg("This is", "a test")
 		if want[i] != have.String() {
@@ -79,33 +71,32 @@ func TestMultipleOutput(t *testing.T) {
 
 	// check if can use color (but don't evaluate before other tests)
 	have.Reset()
-	l.Color(Magenta).Info("This is", "a test")
+	l.Color(ColorMagenta).Println("This is", "a test")
 
-	x := len(want) - 1
-	if want[x] != have.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
+	if want[len(want)-1] != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[0], have.String())
 	}
 }
 
 func TestMultipleShortOutput(t *testing.T) {
 	want := []string{
-		"TEST \x1b[32m [INF] This is a test \x1b[0m\n",
-		"TEST \x1b[33m [WRN] This is a test \x1b[0m\n",
-		"TEST \x1b[31m [ERR] This is a test \x1b[0m\n",
-		"TEST \x1b[36m [DBG] This is a test \x1b[0m\n",
-		"TEST \x1b[34m [TRC] This is a test \x1b[0m\n",
-		"TEST \x1b[31m [FAT] This is a test \x1b[0m\n",
+		"TEST \x1b[32m[INF] This is a test\x1b[0m\n",
+		"TEST \x1b[33m[WRN] This is a test\x1b[0m\n",
+		"TEST \x1b[35m[ERR] This is a test\x1b[0m\n",
+		"TEST \x1b[36m[DBG] This is a test\x1b[0m\n",
+		"TEST \x1b[34m[TRC] This is a test\x1b[0m\n",
+		"TEST \x1b[31m[FAT] This is a test\x1b[0m\n",
 
-		"TEST \x1b[31m [FAT] This isa test\x1b[0m",
+		"TEST \x1b[31m[FAT] This isa test\x1b[0m\n",
 
-		"TEST \x1b[35m [INF] This is a test \x1b[0m\n",
+		"TEST \x1b[35m[INF] This is a test\x1b[0m\n",
 	}
 
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), WithShortPrefix, WithTimeFormat("TEST"), withFatal)
-	for i, lg := range []tt{l.Info, l.Warn, l.Error, l.Debug, l.Trace, l.Fatalln, l.Fatal} {
+	l := New(WithOutput(have), WithShortPrefix(), WithTimeText("TEST"), withFatal)
+	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln, l.Fatal} {
 		have.Reset()
 		lg("This is", "a test")
 		if want[i] != have.String() {
@@ -115,7 +106,7 @@ func TestMultipleShortOutput(t *testing.T) {
 
 	// check if can use color (but don't evaluate before other tests)
 	have.Reset()
-	l.Color(Magenta).Info("This is", "a test")
+	l.Color(ColorMagenta).Infoln("This is", "a test")
 
 	x := len(want) - 1
 	if want[x] != have.String() {
@@ -123,73 +114,75 @@ func TestMultipleShortOutput(t *testing.T) {
 	}
 }
 
-func TestPanicPrint(t *testing.T) {
-	want := []string{
-		"TEST \x1b[31m [PAN] This isa test\x1b[0m",
-	}
+// TODO(njones): figure out how to test the Panic methods, need to do something
+// about the go routine that is handling the writing
+// func TestPanicPrint(t *testing.T) {
+// 	want := []string{
+// 		"TEST \x1b[31m [PAN] This isa test\x1b[0m",
+// 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			x := len(want) - 1
-			if want[x] != r {
-				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-			}
-		}
-	}()
+// 	defer func() {
+// 		if r := recover(); r != nil {
+// 			x := len(want) - 1
+// 			if want[x] != r {
+// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+// 			}
+// 		}
+// 	}()
 
-	type tt func(...interface{})
-	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeFormat("TEST"))
-	for _, lg := range []tt{l.Panic} {
-		lg("This is", "a test")
-	}
-}
+// 	type tt func(...interface{})
+// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix(), WithTimeText("TEST"))
+// 	for _, lg := range []tt{l.Panic} {
+// 		lg("This is", "a test")
+// 	}
+// }
 
-func TestPanicPrintf(t *testing.T) {
-	want := []string{
-		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
-	}
+// func TestPanicPrintf(t *testing.T) {
+// 	want := []string{
+// 		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
+// 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			x := len(want) - 1
-			if want[x] != r {
-				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-			}
-		}
-	}()
+// 	defer func() {
+// 		if r := recover(); r != nil {
+// 			x := len(want) - 1
+// 			if want[x] != r {
+// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+// 			}
+// 		}
+// 	}()
 
-	type tt func(string, ...interface{})
-	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeFormat("TEST"))
-	for _, lg := range []tt{l.Panicf} {
-		lg("%s %s", "This is", "a test")
-	}
-}
+// 	type tt func(string, ...interface{})
+// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeText("TEST"))
+// 	for _, lg := range []tt{l.Panicf} {
+// 		lg("%s %s", "This is", "a test")
+// 	}
+// }
 
-func TestPanicPrintln(t *testing.T) {
-	want := []string{
-		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
-	}
+// func TestPanicPrintln(t *testing.T) {
+// 	want := []string{
+// 		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
+// 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			x := len(want) - 1
-			if want[x] != r {
-				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-			}
-		}
-	}()
+// 	defer func() {
+// 		if r := recover(); r != nil {
+// 			x := len(want) - 1
+// 			if want[x] != r {
+// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+// 			}
+// 		}
+// 	}()
 
-	type tt func(...interface{})
-	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeFormat("TEST"))
-	for _, lg := range []tt{l.Panicln} {
-		lg("This is", "a test")
-	}
-}
+// 	type tt func(...interface{})
+// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeText("TEST"))
+// 	for _, lg := range []tt{l.Panicln} {
+// 		lg("This is", "a test")
+// 	}
+// }
 
 func TestMultipleNoColorOutput(t *testing.T) {
 
 	want := []string{
-		"TEST Info: This isa test",
+		"TEST Info: This isa test\n",
 		"TEST Info: This is a test\n",
 		"TEST Warn: This is a test\n",
 		"TEST Error: This is a test\n",
@@ -201,14 +194,14 @@ func TestMultipleNoColorOutput(t *testing.T) {
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), withTimeFormatted("TEST"), withFatal)
+	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{
 		l.NoColor().Print,
-		l.NoColor().Info,
-		l.NoColor().Warn,
-		l.NoColor().Error,
-		l.NoColor().Debug,
-		l.NoColor().Trace,
+		l.NoColor().Infoln,
+		l.NoColor().Warnln,
+		l.NoColor().Errorln,
+		l.NoColor().Debugln,
+		l.NoColor().Traceln,
 		l.NoColor().Fatalln,
 	} {
 		have.Reset()
@@ -222,20 +215,20 @@ func TestMultipleNoColorOutput(t *testing.T) {
 func TestMultipleFormattedOutput(t *testing.T) {
 
 	want := []string{
-		"TEST \x1b[32m Info: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[32m Info: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[33m Warn: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[31m Error: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[36m Debug: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[34m Trace: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[31m Fatal: This is a test 4 0x01 \x1b[0m\n",
-		"TEST \x1b[35m Info: This is a test 4 0x01 \x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[33mWarn: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[35mError: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[36mDebug: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[34mTrace: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[31mFatal: This is a test 4 0x01\x1b[0m\n",
+		"TEST \x1b[35mInfo: This is a test 4 0x01\x1b[0m\n",
 	}
 
 	have := new(bytes.Buffer)
 
 	type tt func(string, ...interface{})
-	l := New(WithOutput(have), WithTimeFormat("TEST"), withFatal)
+	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Printf, l.Infof, l.Warnf, l.Errorf, l.Debugf, l.Tracef, l.Fatalf} {
 		have.Reset()
 		lg("This is %s %d %#02x", "a test", 4, 1)
@@ -246,7 +239,7 @@ func TestMultipleFormattedOutput(t *testing.T) {
 
 	// check if can use color (but don't evaluate before other tests)
 	have.Reset()
-	l.Color(Magenta).Infof("This is %s %d %#02x", "a test", 4, 1)
+	l.Color(ColorMagenta).Infof("This is %s %d %#02x", "a test", 4, 1)
 
 	x := len(want) - 1
 	if want[x] != have.String() {
@@ -255,14 +248,14 @@ func TestMultipleFormattedOutput(t *testing.T) {
 }
 
 func TestFilteredStringOutput(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
+	want := "TEST \x1b[32mInfo: This is a simple test [1]\x1b[0m\nTEST \x1b[32mInfo: This is a simple test [2]\x1b[0m\n"
 	have := new(bytes.Buffer)
 
 	fn := func(s string) bool {
-		return !strings.Contains(s, "skip")
+		return strings.Contains(s, "skip")
 	}
 
-	l := New(WithFilteredStringOutput(fn, have), WithTimeFormat("TEST"))
+	l := New(WithFilterOutput(have, StringFuncFilter(fn)), WithTimeText("TEST"))
 
 	l.Info("This is a simple test [1]")
 	l.Info("This is a simple test that I skip")
@@ -274,21 +267,21 @@ func TestFilteredStringOutput(t *testing.T) {
 }
 
 func TestFilteredStringOutput2(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test that I keep \x1b[0m\n"
+	want := "TEST \x1b[32mInfo: This is a simple test that I keep\x1b[0m\n"
 	have := new(bytes.Buffer)
 
 	// This shows that we're looking at the data passed in and not including the time or color stuff
 	fn := func(s string) bool {
 		if strings.HasSuffix(s, "[1]") {
-			return false
+			return true
 		}
 		if strings.HasPrefix(s, "[3]") {
-			return false
+			return true
 		}
-		return true
+		return false
 	}
 
-	l := New(WithFilteredStringOutput(fn, have), WithTimeFormat("TEST"))
+	l := New(WithFilterOutput(have, StringFuncFilter(fn)), WithTimeText("TEST"))
 
 	l.Info("This is a simple test [1]")
 	l.Info("This is a simple test that I keep")
@@ -301,17 +294,17 @@ func TestFilteredStringOutput2(t *testing.T) {
 	}
 }
 
-func TestFilteredByteOutput(t *testing.T) {
-	base := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
-	want := "TEST Info: This is a simple test [1] \nTEST Info: This is a simple test [2] \n"
+func TestFilteredOutput3(t *testing.T) {
+	want := "TEST \x1b[32mInfo: This is a simple test that I keep\x1b[0m skip=8680\n"
 	have := new(bytes.Buffer)
 
-	fw := &filteredByteWriter{w: have, fn: noColorOutputFunc}
+	l := New(WithFilterOutput(have, RegexFilter(`(\[\d+\]|I\s*sk.p)`)), WithTimeText("TEST"))
 
-	for i := 0; i < len(base); i += 3 {
-		fw.Write([]byte(base[i : i+3]))
-	}
-	fw.Flush()
+	l.Info("This is a simple test [1]")
+	l.Info("This is a simple test that I keep", KV("skip", '⇨'))
+	l.Infof("%s [%d]", "This is a simple test that I skip", 1)
+	l.Infof("[%d] %s", KV("skip", '⇨'), 3, "This is a simple test that I skip", KV("skip", '←'))
+	l.Info("[3] This is a simple test")
 
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
@@ -320,20 +313,22 @@ func TestFilteredByteOutput(t *testing.T) {
 
 func TestKVFieldsOutput(t *testing.T) {
 	want := []string{
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m basic=3 happy=people quarter=[pound flip]\n",
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
+		"TEST \x1b[32mInfo: Yes we KV log\x1b[0m basic=3 happy=people quarter=[pound flip]\n",
+		"TEST \x1b[32mInfo: Yes we KV log\x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
 	}
 	have := new(bytes.Buffer)
 
 	l := []Logger{
-		New(WithOutput(have), WithTimeFormat("TEST")),
-		New(WithOutput(have), WithTimeFormat("TEST"), WithKVMarshaler(json.Marshal)),
+		New(WithOutput(have), WithTimeText("TEST")),
+		New(WithOutput(have), WithTimeText("TEST"), WithKVMarshaler(json.Marshal)),
 	}
 
 	for i := range want {
 		have.Reset()
-		l[i].Field("happy", "people").Field("basic", 3).Field("quarter", []string{"pound", "flip"})
-		l[i].Info("Yes we KV log")
+		l[i].Field("happy", "people").
+			Field("basic", 3).
+			Field("quarter", []string{"pound", "flip"}).
+			Info("Yes we KV log")
 
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
@@ -342,22 +337,9 @@ func TestKVFieldsOutput(t *testing.T) {
 
 	for i := range want {
 		have.Reset()
-		l[i].Fields(KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
-		l[i].Info("Yes we KV log")
-
-		if want[i] != have.String() {
-			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
-		}
-	}
-
-	for i := range want {
-		have.Reset()
-		l[i].Fields(KVMap(KeyValues{
-			"happy":   "people",
-			"basic":   3,
-			"quarter": []string{"pound", "flip"},
-		})...)
-		l[i].Info("Yes we KV log")
+		l[i].Fields(map[string]interface{}{"happy": "people", "basic": 3}).
+			Fields(map[string]interface{}{"quarter": []string{"pound", "flip"}}).
+			Info("Yes we KV log")
 
 		if want[i] != have.String() {
 			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
@@ -365,11 +347,11 @@ func TestKVFieldsOutput(t *testing.T) {
 	}
 }
 
-func TestKVOutput(t *testing.T) {
+func TestInlineKVOutput(t *testing.T) {
 	want := []string{
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m basic=3 happy=people quarter=[pound flip]\n",
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
-		"TEST \x1b[32m Info: Yes we KV log \x1b[0m [ERR logger.go (marshal)]: map[string]interface {}{\"happy\":\"people\", \"basic\":3, \"quarter\":[]string{\"pound\", \"flip\"}}\n",
+		"TEST \x1b[32mInfo: Yes we KV log\x1b[0m basic=3 happy=people quarter=[pound flip]\n",
+		"TEST \x1b[32mInfo: Yes we KV log\x1b[0m {\"basic\":3,\"happy\":\"people\",\"quarter\":[\"pound\",\"flip\"]}\n",
+		"TEST \x1b[32mInfo: Yes we KV log\x1b[0m [ERR logger.go (marshal)]: map[string]interface {}{\"happy\":\"people\", \"basic\":3, \"quarter\":[]string{\"pound\", \"flip\"}}\n",
 	}
 	have := new(bytes.Buffer)
 
@@ -378,14 +360,14 @@ func TestKVOutput(t *testing.T) {
 	errHave := new(bytes.Buffer)
 
 	l := []Logger{
-		New(WithOutput(have), WithTimeFormat("TEST")),
-		New(WithOutput(have), WithTimeFormat("TEST"), WithKVMarshaler(json.Marshal)),
-		New(WithOutput(have), WithTimeFormat("TEST"), WithKVMarshaler(errorMarshal), withStdErr(errHave)),
+		New(WithOutput(have), WithTimeText("TEST")),
+		New(WithOutput(have), WithTimeText("TEST"), WithKVMarshaler(json.Marshal)),
+		New(WithOutput(have), WithTimeText("TEST"), WithKVMarshaler(errorMarshal), withStdErr(errHave)),
 	}
 
 	for i := range want {
 		have.Reset()
-		l[i].Info("Yes we KV log", KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
+		l[i].Print("Yes we KV log", KV("happy", "people"), KV("basic", 3), KV("quarter", []string{"pound", "flip"}))
 
 		// HARDCODED //
 		// if this is an error marshaling then do a different type of compare, because the map can be randomized
@@ -424,15 +406,15 @@ func TestKVOutput(t *testing.T) {
 }
 
 func TestOnErrorOutput(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m\n"
+	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	have := new(bytes.Buffer)
 
-	l := New(WithOutput(have), WithTimeFormat("TEST"))
+	l := New(WithOutput(have), WithTimeText("TEST"))
 
 	var err error
 	l.OnErr(err).Info("This is a simple test that is NOT an error")
 	err = errors.New("simple test")
-	l.OnErr(err).Info("This is a", err)
+	l.OnErr(err).Infoln("This is a", err)
 
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
@@ -440,28 +422,28 @@ func TestOnErrorOutput(t *testing.T) {
 }
 
 func TestUTCTime(t *testing.T) {
-	want := "Mar-6-1974 16:03:01 \x1b[32m Info: This is a simple test \x1b[0m\n"
+	want := "Mar-6-1974 16:03:01 \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	have := new(bytes.Buffer)
 
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
 		t.Error(err)
 	}
-	l := New(withTime(time.Date(1974, time.March, 6, 9, 3, 1, 0, loc)), WithOutput(have), WithTimeAsUTC)
+	l := New(withTime(time.Date(1974, time.March, 6, 9, 3, 1, 0, loc)), WithOutput(have), WithTimeAsUTC())
 
 	l.Info("This is a simple test")
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
 	}
 
-	want2 := "Mar-27-1976 17:03:01 \x1b[32m Info: This is a simple test \x1b[0m\n"
+	want2 := "Mar-27-1976 17:03:01 \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	have2 := new(bytes.Buffer)
 
 	loc2, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
 		t.Error(err)
 	}
-	l2 := New(withTime(time.Date(1976, time.March, 27, 9, 3, 1, 0, loc2)), WithOutput(have2), WithTimeAsUTC)
+	l2 := New(withTime(time.Date(1976, time.March, 27, 9, 3, 1, 0, loc2)), WithOutput(have2), WithTimeAsUTC())
 
 	l2.Info("This is a simple test")
 	if want2 != have2.String() {
@@ -469,32 +451,74 @@ func TestUTCTime(t *testing.T) {
 	}
 }
 
+func TestTimeNow(t *testing.T) {
+	want := fmt.Sprintf("%s \x1b[32mInfo: This is a simple test\x1b[0m\n", time.Now().Format(time.RFC3339))
+	have := new(bytes.Buffer)
+
+	l := New(WithOutput(have), WithTimeFormat(time.RFC3339))
+
+	l.Info("This is a simple test")
+	if want != have.String() {
+		// turn back a sec and see if we crossed a boundry
+		seconds := want[17:19]
+		i, err := strconv.Atoi(seconds)
+		if err != nil {
+			t.Errorf("error parsing seconds: %v", err)
+			return
+		}
+		i--
+		want2 := fmt.Sprintf("%s%d%s", want[:17], i, want[19:])
+		if want2 != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want2, have.String())
+		}
+	}
+}
+
 func TestSuppressOutput(t *testing.T) {
 	want := []string{
 		"",
-		"TEST \x1b[32m Info: This is a simple test \x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a simple test\x1b[0m\n",
+		"TEST \x1b[32mInfo: This is a simple test that is not suppressed\x1b[0m\n",
+		"TEST \x1b[33mWarn: This is a simple test that won't be suppressed\x1b[0m\nTEST \x1b[32mInfo: This is a simple test\x1b[0m\n",
 	}
 	have := new(bytes.Buffer)
 
-	l := New(WithOutput(have), WithTimeFormat("TEST"))
+	l := New(WithOutput(have), WithTimeText("TEST"))
 
-	l.Suppress()
-	l.Info("This is a simple test that is suppressed")
+	l.Suppress(LevelInfo).Infoln("This is a simple test that is suppressed")
 
 	if want[0] != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want[0], have.String())
 	}
 
-	l.UnSuppress()
 	l.Info("This is a simple test")
 
 	if want[1] != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want[1], have.String())
 	}
+
+	have.Reset()
+	l.Suppress(LevelInfo).Println("This is a simple test that is not suppressed")
+
+	if want[2] != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[2], have.String())
+	}
+
+	have.Reset()
+	l2 := l.Suppress(LevelInfo | LevelDebug)
+	l2.Infoln("This is a simple test that is suppressed")
+	l2.Warnln("This is a simple test that won't be suppressed")
+	l2.Debugln("This is a simple test that is suppressed")
+	l.Infoln("This is a simple test")
+
+	if want[3] != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want[3], have.String())
+	}
 }
 
 func TestNetOutput(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m\n"
+	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	haveCh := make(chan string, 1)
 
 	cont := make(chan struct{}, 1)
@@ -522,7 +546,6 @@ func TestNetOutput(t *testing.T) {
 				if i == 0 {
 					var bb = make([]byte, 1)
 					conn.Read(bb)
-					log.Println(bb)
 					fmt.Print(".")
 					if m >= mx {
 						t.Log("breaking... nil")
@@ -540,8 +563,8 @@ func TestNetOutput(t *testing.T) {
 	}()
 	<-cont
 
-	l := New(WithOutput(NetWriter("tcp", ":5550")), WithTimeFormat("TEST"))
-	l.Info("This", "is a", "simple", "test")
+	l := New(WithOutput(NetWriter("tcp", ":5550")), WithTimeText("TEST"))
+	l.Infoln("This", "is a", "simple", "test")
 
 	have := <-haveCh
 
@@ -550,14 +573,14 @@ func TestNetOutput(t *testing.T) {
 	}
 
 	errWant := []string{
-		"error writing println to log: dial abc: unknown network abc\n",
-		"error writing printf to log: dial abc: unknown network abc\n",
-		"error writing print to log: dial abc: unknown network abc\n",
+		"error writing to log: dial abc: unknown network abc\n",
+		"error writing to log: dial abc: unknown network abc\n",
+		"error writing to log: dial abc: unknown network abc\n",
 	}
 	errHave := new(bytes.Buffer)
 
-	l2 := New(WithOutput(NetWriter("abc", "123")), WithTimeFormat("TEST"), withStdErr(errHave))
-	l2.Info("This", "is a", "simple", "test")
+	l2 := New(WithOutput(NetWriter("abc", "123")), WithTimeText("TEST"), withStdErr(errHave))
+	l2.Infoln("This", "is a", "simple", "test")
 
 	if errWant[0] != errHave.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant[0], errHave.String())
@@ -578,90 +601,98 @@ func TestNetOutput(t *testing.T) {
 	}
 }
 
-func TestHttpHandlerOutput(t *testing.T) {
-	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
-	wantBody := `This is a simple test`
+// TODO(njones): implement this with the new logger code.
+// func TestHttpHandlerOutput(t *testing.T) {
+// 	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
+// 	wantBody := `This is a simple test`
 
-	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m X-Session-Id=Test\n"
-	have := new(bytes.Buffer)
+// 	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m X-Session-Id=Test\n"
+// 	have := new(bytes.Buffer)
 
-	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeFormat("TEST"))
+// 	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeText("TEST"))
 
-	mux := http.NewServeMux()
-	mux.Handle("/test/endpoint", l.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(wantHeader, wantHeaderValue)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(wantBody))
-	})))
+// 	mux := http.NewServeMux()
+// 	mux.Handle("/test/endpoint", l.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.Header().Set(wantHeader, wantHeaderValue)
+// 		w.WriteHeader(http.StatusOK)
+// 		w.Write([]byte(wantBody))
+// 	})))
 
-	req := httptest.NewRequest("GET", "/test/endpoint", nil)
-	req.Header.Set(wantHeader, wantHeaderValue)
+// 	req := httptest.NewRequest("GET", "/test/endpoint", nil)
+// 	req.Header.Set(wantHeader, wantHeaderValue)
 
-	res := httptest.NewRecorder()
-	mux.ServeHTTP(res, req)
+// 	res := httptest.NewRecorder()
+// 	mux.ServeHTTP(res, req)
 
-	haveBodyBytes := res.Body.String()
+// 	haveBodyBytes := res.Body.String()
 
-	l.Info(wantBody)
+// 	l.Info(wantBody)
 
-	haveBody := string(haveBodyBytes)
-	if wantBody != haveBody {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", wantBody, haveBody)
-	}
+// 	haveBody := string(haveBodyBytes)
+// 	if wantBody != haveBody {
+// 		t.Errorf("\nwant: %q\n\nhave: %q\n", wantBody, haveBody)
+// 	}
 
-	if want != have.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have)
-	}
+// 	if want != have.String() {
+// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have)
+// 	}
 
-	// No WithHeader first
-	l2 := New(WithOutput(have), WithTimeFormat("TEST"))
+// 	// No WithHeader first
+// 	l2 := New(WithOutput(have), WithTimeText("TEST"))
 
-	mux2 := http.NewServeMux()
-	mux2.Handle("/test/endpoint2", l2.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(wantHeader, wantHeaderValue)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(wantBody))
-	})))
+// 	mux2 := http.NewServeMux()
+// 	mux2.Handle("/test/endpoint2", l2.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.Header().Set(wantHeader, wantHeaderValue)
+// 		w.WriteHeader(http.StatusOK)
+// 		w.Write([]byte(wantBody))
+// 	})))
 
-	req2 := httptest.NewRequest("GET", "/test/endpoint2", nil)
-	req2.Header.Set(wantHeader, wantHeaderValue)
+// 	req2 := httptest.NewRequest("GET", "/test/endpoint2", nil)
+// 	req2.Header.Set(wantHeader, wantHeaderValue)
 
-	res2 := httptest.NewRecorder()
-	mux2.ServeHTTP(res2, req2)
+// 	res2 := httptest.NewRecorder()
+// 	mux2.ServeHTTP(res2, req2)
 
-	l2.Info(wantBody)
-}
+// 	l2.Info(wantBody)
+// }
 
-func TestDefaultStdoutOutput(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m\n"
-	have := new(bytes.Buffer)
+// TODO(njones): maybe not this exact thing, but something close
+// func TestFilteredByteOutput(t *testing.T) {
+// 	base := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
+// 	want := "TEST Info: This is a simple test [1] \nTEST Info: This is a simple test [2] \n"
+// 	have := new(bytes.Buffer)
 
-	l := New(withStdOut(have), WithTimeFormat("TEST"))
-	l.Info("This is a simple test")
+// 	fw := &filteredByteWriter{w: have, fn: noColorOutputFunc}
 
-	if want != have.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
-	}
-}
+// 	for i := 0; i < len(base); i += 3 {
+// 		fw.Write([]byte(base[i : i+3]))
+// 	}
+// 	fw.Flush()
 
-func TestWithNoColorOutput(t *testing.T) {
-	want := "TEST Info: This is a simple test \n"
-	have := new(bytes.Buffer)
+// 	if want != have.String() {
+// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+// 	}
+// }
 
-	l := New(WithNoColorOutput(have), WithTimeFormat("TEST"))
-	l.Info("This is a simple test")
+// TODO(njones): implement this with the new logger code
+// func TestWithNoColorOutput(t *testing.T) {
+// 	want := "TEST Info: This is a simple test \n"
+// 	have := new(bytes.Buffer)
 
-	if want != have.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
-	}
-}
+// 	l := New(WithNoColorOutput(have), WithTimeText("TEST"))
+// 	l.Info("This is a simple test")
+
+// 	if want != have.String() {
+// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+// 	}
+// }
 
 func TestPrintOutput(t *testing.T) {
-	want := "TEST \x1b[32m Info: This is a simple test\x1b[0m"
+	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	have := new(bytes.Buffer)
 
-	l := New(WithOutput(have), WithTimeFormat("TEST"))
-	l.Print("This is a simple test")
+	l := New(WithOutput(have), WithTimeText("TEST"))
+	l.Println("This is a simple test")
 
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
@@ -675,7 +706,7 @@ func TestConcurrentInfofWarnf(t *testing.T) {
 	finish := make(chan struct{}, 1)
 	rand.Seed(time.Now().UnixNano())
 
-	l := New(withStdOut(have), withTimeFormatted("TEST"))
+	l := New(WithOutput(have), WithTimeText("TEST"))
 
 	xx := 10
 	nn := 4
@@ -715,6 +746,7 @@ func TestConcurrentInfofWarnf(t *testing.T) {
 	concurrentWant := "\n" + fmt.Sprintf(concurrentWantf, "\x1b[32m", "\x1b[33m", "\x1b[0m")
 	haves := strings.Split(have.String(), "\n")
 	sort.Strings(haves)
+
 	concurrentHave := strings.Join(haves, "\n")
 
 	if concurrentWant != concurrentHave {
@@ -726,11 +758,11 @@ func BenchmarkLinet(b *testing.B) {
 	b.ReportAllocs()
 
 	have := new(bytes.Buffer)
-	l := New(withStdOut(have))
+	l := New(WithOutput(have))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		l.Info("Testing with a string of", i)
+		l.Println("Testing with a string of", i)
 	}
 }
 
@@ -738,11 +770,11 @@ func BenchmarkFormat(b *testing.B) {
 	b.ReportAllocs()
 
 	have := new(bytes.Buffer)
-	l := New(withStdOut(have))
+	l := New(WithOutput(have))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		l.Infof("Testing with a string of %02d", i)
+		l.Printf("Testing with a string of %02d\n", i, KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"))
 	}
 }
 
@@ -750,7 +782,7 @@ func BenchmarkNone(b *testing.B) {
 	b.ReportAllocs()
 
 	have := new(bytes.Buffer)
-	l := New(withStdOut(have))
+	l := New(WithOutput(have), WithTimeText("TEST"))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -758,83 +790,83 @@ func BenchmarkNone(b *testing.B) {
 	}
 }
 
-var concurrentWantf = `TEST %[1]s Info: This is a simple concurrent test (info) #00 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #01 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #02 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #03 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #04 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #05 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #06 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #07 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #08 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #09 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #10 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #11 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #12 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #13 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #14 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #15 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #16 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #17 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #18 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #19 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #20 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #21 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #22 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #23 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #24 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #25 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #26 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #27 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #28 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #29 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #30 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #31 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #32 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #33 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #34 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #35 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #36 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #37 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #38 %[3]s
-TEST %[1]s Info: This is a simple concurrent test (info) #39 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #00 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #01 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #02 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #03 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #04 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #05 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #06 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #07 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #08 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #09 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #10 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #11 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #12 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #13 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #14 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #15 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #16 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #17 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #18 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #19 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #20 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #21 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #22 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #23 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #24 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #25 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #26 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #27 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #28 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #29 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #30 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #31 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #32 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #33 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #34 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #35 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #36 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #37 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #38 %[3]s
-TEST %[2]s Warn: This is a simple concurrent test (warn) #39 %[3]s`
+var concurrentWantf = `TEST %[1]sInfo: This is a simple concurrent test (info) #00%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #01%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #02%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #03%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #04%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #05%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #06%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #07%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #08%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #09%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #10%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #11%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #12%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #13%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #14%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #15%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #16%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #17%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #18%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #19%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #20%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #21%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #22%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #23%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #24%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #25%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #26%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #27%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #28%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #29%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #30%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #31%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #32%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #33%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #34%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #35%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #36%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #37%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #38%[3]s
+TEST %[1]sInfo: This is a simple concurrent test (info) #39%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #00%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #01%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #02%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #03%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #04%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #05%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #06%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #07%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #08%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #09%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #10%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #11%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #12%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #13%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #14%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #15%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #16%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #17%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #18%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #19%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #20%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #21%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #22%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #23%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #24%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #25%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #26%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #27%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #28%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #29%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #30%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #31%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #32%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #33%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #34%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #35%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #36%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #37%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #38%[3]s
+TEST %[2]sWarn: This is a simple concurrent test (warn) #39%[3]s`
