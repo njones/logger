@@ -459,7 +459,7 @@ func TestTimeNow(t *testing.T) {
 
 	l.Info("This is a simple test")
 	if want != have.String() {
-		// turn back a sec and see if we crossed a boundry
+		// turn back a sec and see if we crossed a boundary
 		seconds := want[17:19]
 		i, err := strconv.Atoi(seconds)
 		if err != nil {
@@ -774,6 +774,7 @@ func BenchmarkFormat(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		// The lucky line below has more parameters than directives because the KV's get taken out.
 		l.Printf("Testing with a string of %02d\n", i, KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"))
 	}
 }

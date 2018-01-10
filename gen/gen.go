@@ -66,8 +66,8 @@ type escStrData struct {
 }
 
 var escs = map[string]map[string]escStrData{
-	"colorType":  map[string]escStrData{},
-	"formatType": map[string]escStrData{},
+	"colorType":  {},
+	"formatType": {},
 }
 var loglevels []logLevelData
 var leveltypes []string
@@ -85,7 +85,7 @@ func main() {
 	}
 	defer gendFile.Close()
 	defer func() {
-		cmd := exec.Command("go", "fmt", "../logger_generated.go")
+		cmd := exec.Command("gofmt", "-w", "-s", "../logger_generated.go")
 		err := cmd.Run()
 		if err != nil {
 			log.Fatal(err)
@@ -98,7 +98,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer gendTestFile.Close()
-
+	defer func() {
+		cmd := exec.Command("gofmt", "-w", "-s", "../logger_generated_test.go")
+		err := cmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("go Logger test code generated and formatted.")
+	}()
 	ast.Walk(VisitorFunc(FindTypes), node)
 
 	genTemplate.Execute(gendFile, struct {
@@ -126,10 +133,13 @@ func main() {
 	})
 }
 
+// VisitorFunc a type
 type VisitorFunc func(n ast.Node) ast.Visitor
 
+// Visit does the node walking
 func (f VisitorFunc) Visit(n ast.Node) ast.Visitor { return f(n) }
 
+// FindTypes loops through the nodes
 func FindTypes(n ast.Node) ast.Visitor {
 
 	var (
