@@ -49,9 +49,9 @@ const (
 // The printType constants which deterimine how the line will be output to the
 // writer.
 const (
-	AsPrint printType = iota
-	AsPrintf
-	AsPrintln
+	asPrint printType = iota
+	asPrintf
+	asPrintln
 )
 
 // Escape codes integer values for formatting and colors - the escape sequences
@@ -140,29 +140,6 @@ type KVStruct struct {
 // options to the end user.
 type optFunc func(*baseLogger)
 
-// TODO(njones): make copyBaseLogger auto-generated.
-// copyBaseLogger returns a deep copy of the baseLogger, this should be manually
-// kept up to date
-func copyBaseLogger(l *baseLogger) *baseLogger {
-	return &baseLogger{
-		o:         l.o,
-		stdout:    l.stdout,
-		stderr:    l.stderr,
-		to:        l.to,
-		ts:        l.ts,
-		tsIsUTC:   l.tsIsUTC,
-		tsText:    l.tsText,
-		tsFormat:  l.tsFormat,
-		logLevel:  l.logLevel,
-		skip:      l.skip,
-		hasFilter: l.hasFilter,
-		kv:        l.kv,
-		color:     l.color,
-		marshal:   l.marshal,
-		fatal:     l.fatal,
-	}
-}
-
 // New returns a Logger interface that exposes the same as the standard logger
 // along with level logging and other options.
 func New(opts ...optFunc) Logger {
@@ -224,11 +201,11 @@ func New(opts ...optFunc) Logger {
 
 			// write the log line
 			switch logg.is {
-			case AsPrint:
+			case asPrint:
 				buf.WriteString(fmt.Sprint(logg.values...))
-			case AsPrintf:
+			case asPrintf:
 				buf.WriteString(fmt.Sprintf(logg.formatStr, logg.values...))
-			case AsPrintln:
+			case asPrintln:
 				// spacing was added manually...
 				buf.WriteString(fmt.Sprint(logg.values...))
 			}
@@ -275,6 +252,15 @@ func New(opts ...optFunc) Logger {
 	}()
 
 	return l
+}
+
+// With adds options to a logger and returns a new logger with those options
+func (l *baseLogger) With(options ...optFunc) Logger {
+	wl := copyBaseLogger(l)
+	for _, opt := range options {
+		opt(wl)
+	}
+	return wl
 }
 
 // Suppress takes a bitwise OR (|) of the different levels to suppress
@@ -446,10 +432,10 @@ func StdKVMarshal(in interface{}) ([]byte, error) {
 	return []byte(strings.Join(rtns, " ")), nil
 }
 
-// WithShortPrefix changes the prefix of the log level to be a short three characters.
-func WithShortPrefix() optFunc {
+// WithPrefix changes the prefix of the log level to be different.
+func WithPrefix(lt levelType) optFunc {
 	return func(l *baseLogger) {
-		l.logLevel = LevelShortBracketStr
+		l.logLevel = lt
 	}
 }
 
@@ -507,9 +493,20 @@ func WithFilterOutput(w io.Writer, filters ...Filter) optFunc {
 	}
 }
 
+// NotFilter negates the check on the wrapped filter
+func NotFilter(filter Filter) Filter {
+	return &filterNot{f: filter}
+}
+
+// filterNot is a type to define a function that accepts a filter and negates the check.
+type filterNot struct{ f Filter }
+
+// Check satisfies the Filter interface and runs the passed in function.
+func (n *filterNot) Check(data string) bool { return !n.f.Check(data) }
+
 // StringFuncFilter is a filter function that takes the function func(string)bool with any returned true
 // value, filtering out the log line, so it will not display.
-func StringFuncFilter(fn func(string) bool) *filterStrFunc {
+func StringFuncFilter(fn func(string) bool) Filter {
 	return &filterStrFunc{fn: fn}
 }
 
@@ -521,7 +518,7 @@ func (sf *filterStrFunc) Check(data string) bool { return sf.fn(data) }
 
 // RegexFilter is a filter function that takes a regular expresson and if it is matched by the logline
 // then that line is filtered out
-func RegexFilter(pattern string) *filterRegex {
+func RegexFilter(pattern string) Filter {
 	return &filterRegex{regexp: regexp.MustCompile(pattern)}
 }
 
@@ -556,7 +553,7 @@ func (fw filterwriter) Callback(logln string, pre, line int) {
 	}
 }
 
-// NetWriter is a helper function that will log writes to a TCP/UDP address
+// NetWriter is a helper function that will log writes to a TCP/UDP address. Any errors will be written to stderr.
 func NetWriter(network, address string) io.Writer {
 	return netwriter{network: network, address: address}
 }

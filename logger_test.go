@@ -86,16 +86,14 @@ func TestMultipleShortOutput(t *testing.T) {
 		"TEST \x1b[36m[DBG] This is a test\x1b[0m\n",
 		"TEST \x1b[34m[TRC] This is a test\x1b[0m\n",
 		"TEST \x1b[31m[FAT] This is a test\x1b[0m\n",
-
 		"TEST \x1b[31m[FAT] This isa test\x1b[0m\n",
-
 		"TEST \x1b[35m[INF] This is a test\x1b[0m\n",
 	}
 
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), WithShortPrefix(), WithTimeText("TEST"), withFatal)
+	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln, l.Fatal} {
 		have.Reset()
 		lg("This is", "a test")
@@ -111,6 +109,57 @@ func TestMultipleShortOutput(t *testing.T) {
 	x := len(want) - 1
 	if want[x] != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], have.String())
+	}
+}
+
+func TestWithOutput(t *testing.T) {
+	want1 := []string{
+		"TEST \x1b[32m[INF] This is a test\x1b[0m\n",
+		"TEST \x1b[33m[WRN] This is a test\x1b[0m\n",
+		"TEST \x1b[35m[ERR] This is a test\x1b[0m\n",
+		"TEST \x1b[36m[DBG] This is a test\x1b[0m\n",
+		"TEST \x1b[34m[TRC] This is a test\x1b[0m\n",
+		"TEST \x1b[31m[FAT] This is a test\x1b[0m\n",
+
+		"TEST \x1b[35m[INF] This is a test\x1b[0m\n",
+	}
+
+	want2 := []string{
+		"TEST \x1b[32mINF This is a test\x1b[0m\n",
+		"TEST \x1b[33mWRN This is a test\x1b[0m\n",
+		"TEST \x1b[35mERR This is a test\x1b[0m\n",
+		"TEST \x1b[36mDBG This is a test\x1b[0m\n",
+		"TEST \x1b[34mTRC This is a test\x1b[0m\n",
+		"TEST \x1b[31mFAT This is a test\x1b[0m\n",
+	}
+
+	have := new(bytes.Buffer)
+
+	type tt func(...interface{})
+	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
+	l2 := l.With(WithPrefix(LevelShortStr))
+	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
+		have.Reset()
+		lg("This is", "a test")
+		if want1[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want1[i], have.String())
+		}
+	}
+	for i, lg := range []tt{l2.Infoln, l2.Warnln, l2.Errorln, l2.Debugln, l2.Traceln, l2.Fatalln} {
+		have.Reset()
+		lg("This is", "a test")
+		if want2[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want2[i], have.String())
+		}
+	}
+
+	// check if can use color (but don't evaluate before other tests)
+	have.Reset()
+	l.Color(ColorMagenta).Infoln("This is", "a test")
+
+	x := len(want1) - 1
+	if want1[x] != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want1[x], have.String())
 	}
 }
 
@@ -259,6 +308,25 @@ func TestFilteredStringOutput(t *testing.T) {
 
 	l.Info("This is a simple test [1]")
 	l.Info("This is a simple test that I skip")
+	l.Info("This is a simple test [2]")
+
+	if want != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+	}
+}
+
+func TestNegativeFilteredStringOutput(t *testing.T) {
+	want := "TEST \x1b[32mInfo: This is a simple test that I skip NOT!\x1b[0m\n"
+	have := new(bytes.Buffer)
+
+	fn := func(s string) bool {
+		return strings.Contains(s, "skip")
+	}
+
+	l := New(WithFilterOutput(have, NotFilter(StringFuncFilter(fn))), WithTimeText("TEST"))
+
+	l.Info("This is a simple test [1]")
+	l.Info("This is a simple test that I skip NOT!")
 	l.Info("This is a simple test [2]")
 
 	if want != have.String() {
