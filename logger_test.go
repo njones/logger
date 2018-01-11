@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strconv"
 	"strings"
@@ -163,70 +166,86 @@ func TestWithOutput(t *testing.T) {
 	}
 }
 
-// TODO(njones): figure out how to test the Panic methods, need to do something
-// about the go routine that is handling the writing
-// func TestPanicPrint(t *testing.T) {
-// 	want := []string{
-// 		"TEST \x1b[31m [PAN] This isa test\x1b[0m",
-// 	}
+func TestPanicPrint(t *testing.T) {
+	want := []string{
+		"TEST \x1b[31m[PAN] This isa test\x1b[0m",
+	}
 
-// 	defer func() {
-// 		if r := recover(); r != nil {
-// 			x := len(want) - 1
-// 			if want[x] != r {
-// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-// 			}
-// 		}
-// 	}()
+	var r interface{}
+	defer func() {
+		if _, ok := r.(*string); ok {
+			t.Errorf("The panic was never fired")
+		}
+	}()
+	defer func() {
+		if r = recover(); r != nil {
+			x := len(want) - 1
+			if want[x] != r {
+				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+			}
+		}
+	}()
 
-// 	type tt func(...interface{})
-// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix(), WithTimeText("TEST"))
-// 	for _, lg := range []tt{l.Panic} {
-// 		lg("This is", "a test")
-// 	}
-// }
+	type tt func(...interface{})
+	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	for _, lg := range []tt{l.Panic} {
+		lg("This is", "a test")
+	}
+}
 
-// func TestPanicPrintf(t *testing.T) {
-// 	want := []string{
-// 		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
-// 	}
+func TestPanicPrintf(t *testing.T) {
+	want := []string{
+		"TEST \x1b[31m[PAN] This is a test\x1b[0m",
+	}
 
-// 	defer func() {
-// 		if r := recover(); r != nil {
-// 			x := len(want) - 1
-// 			if want[x] != r {
-// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-// 			}
-// 		}
-// 	}()
+	var r interface{}
+	defer func() {
+		if _, ok := r.(*string); ok {
+			t.Errorf("The panic was never fired")
+		}
+	}()
+	defer func() {
+		if r = recover(); r != nil {
+			x := len(want) - 1
+			if want[x] != r {
+				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+			}
+		}
+	}()
 
-// 	type tt func(string, ...interface{})
-// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeText("TEST"))
-// 	for _, lg := range []tt{l.Panicf} {
-// 		lg("%s %s", "This is", "a test")
-// 	}
-// }
+	type tt func(string, ...interface{})
+	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	for _, lg := range []tt{l.Panicf} {
+		lg("%s %s", "This is", "a test")
+	}
+}
 
-// func TestPanicPrintln(t *testing.T) {
-// 	want := []string{
-// 		"TEST \x1b[31m [PAN] This is a test \x1b[0m\n",
-// 	}
+func TestPanicPrintln(t *testing.T) {
+	want := []string{
+		"TEST \x1b[31m[PAN] This is a test\x1b[0m",
+	}
 
-// 	defer func() {
-// 		if r := recover(); r != nil {
-// 			x := len(want) - 1
-// 			if want[x] != r {
-// 				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
-// 			}
-// 		}
-// 	}()
+	var r interface{}
+	defer func() {
+		if _, ok := r.(*string); ok {
+			t.Errorf("The panic was never fired")
+		}
+	}()
+	defer func() {
+		if r = recover(); r != nil {
+			x := len(want) - 1
+			if want[x] != r {
+				t.Errorf("\nwant: %q\n\nhave: %q\n", want[x], r)
+			}
+		}
+	}()
 
-// 	type tt func(...interface{})
-// 	l := New(WithOutput(ioutil.Discard), WithShortPrefix, WithTimeText("TEST"))
-// 	for _, lg := range []tt{l.Panicln} {
-// 		lg("This is", "a test")
-// 	}
-// }
+	type tt func(...interface{})
+	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	for _, lg := range []tt{l.Panicln} {
+		lg("This is", "a test")
+	}
+}
 
 func TestMultipleNoColorOutput(t *testing.T) {
 
@@ -669,60 +688,59 @@ func TestNetOutput(t *testing.T) {
 	}
 }
 
-// TODO(njones): implement this with the new logger code.
-// func TestHttpHandlerOutput(t *testing.T) {
-// 	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
-// 	wantBody := `This is a simple test`
+func TestHttpHandlerOutput(t *testing.T) {
+	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
+	wantBody := `This is a simple test`
 
-// 	want := "TEST \x1b[32m Info: This is a simple test \x1b[0m X-Session-Id=Test\n"
-// 	have := new(bytes.Buffer)
+	want := "\x1b[32m192.0.2.1:1234 - - [TEST] \"GET /test/endpoint HTTP/1.1\" 200 21  \x1b[0m X-Session-Id=Test\nTEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
+	have := new(bytes.Buffer)
 
-// 	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeText("TEST"))
+	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeText("TEST"))
 
-// 	mux := http.NewServeMux()
-// 	mux.Handle("/test/endpoint", l.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// 		w.Header().Set(wantHeader, wantHeaderValue)
-// 		w.WriteHeader(http.StatusOK)
-// 		w.Write([]byte(wantBody))
-// 	})))
+	mux := http.NewServeMux()
+	mux.Handle("/test/endpoint", l.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(wantHeader, wantHeaderValue)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(wantBody))
+	})))
 
-// 	req := httptest.NewRequest("GET", "/test/endpoint", nil)
-// 	req.Header.Set(wantHeader, wantHeaderValue)
+	req := httptest.NewRequest("GET", "/test/endpoint", nil)
+	req.Header.Set(wantHeader, wantHeaderValue)
 
-// 	res := httptest.NewRecorder()
-// 	mux.ServeHTTP(res, req)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
 
-// 	haveBodyBytes := res.Body.String()
+	haveBodyBytes := res.Body.String()
 
-// 	l.Info(wantBody)
+	l.Info(wantBody)
 
-// 	haveBody := string(haveBodyBytes)
-// 	if wantBody != haveBody {
-// 		t.Errorf("\nwant: %q\n\nhave: %q\n", wantBody, haveBody)
-// 	}
+	haveBody := string(haveBodyBytes)
+	if wantBody != haveBody {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", wantBody, haveBody)
+	}
 
-// 	if want != have.String() {
-// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have)
-// 	}
+	if want != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have)
+	}
 
-// 	// No WithHeader first
-// 	l2 := New(WithOutput(have), WithTimeText("TEST"))
+	// No WithHeader first
+	l2 := New(WithOutput(have), WithTimeText("TEST"))
 
-// 	mux2 := http.NewServeMux()
-// 	mux2.Handle("/test/endpoint2", l2.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// 		w.Header().Set(wantHeader, wantHeaderValue)
-// 		w.WriteHeader(http.StatusOK)
-// 		w.Write([]byte(wantBody))
-// 	})))
+	mux2 := http.NewServeMux()
+	mux2.Handle("/test/endpoint2", l2.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(wantHeader, wantHeaderValue)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(wantBody))
+	})))
 
-// 	req2 := httptest.NewRequest("GET", "/test/endpoint2", nil)
-// 	req2.Header.Set(wantHeader, wantHeaderValue)
+	req2 := httptest.NewRequest("GET", "/test/endpoint2", nil)
+	req2.Header.Set(wantHeader, wantHeaderValue)
 
-// 	res2 := httptest.NewRecorder()
-// 	mux2.ServeHTTP(res2, req2)
+	res2 := httptest.NewRecorder()
+	mux2.ServeHTTP(res2, req2)
 
-// 	l2.Info(wantBody)
-// }
+	l2.Info(wantBody)
+}
 
 // TODO(njones): maybe not this exact thing, but something close
 // func TestFilteredByteOutput(t *testing.T) {

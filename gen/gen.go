@@ -87,9 +87,10 @@ func main() {
 	defer gendFile.Close()
 	defer func() {
 		cmd := exec.Command("gofmt", "-w", "-s", "../logger_generated.go")
+		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("gofmt logger generated error: ", err)
 		}
 		log.Println("go Logger code generated and formatted.")
 	}()
@@ -101,15 +102,17 @@ func main() {
 	defer gendTestFile.Close()
 	defer func() {
 		cmd := exec.Command("gofmt", "-w", "-s", "../logger_generated_test.go")
+		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("gofmt logger generated tests error: ", err)
 		}
 		log.Println("go Logger test code generated and formatted.")
 	}()
 	ast.Walk(VisitorFunc(FindTypes), node)
 
-	genTemplate.Execute(gendFile, struct {
+	outLog := gendFile //io.MultiWriter(os.Stdout, gendFile) //
+	genTemplate.Execute(outLog, struct {
 		Timestamp        time.Time
 		Escs             map[string]map[string]escStrData
 		Loglevels        []logLevelData
@@ -123,7 +126,8 @@ func main() {
 		BaseLoggerFields: blFields,
 	})
 
-	genTestTemplate.Execute(gendTestFile, struct {
+	outTestLog := gendTestFile // io.MultiWriter(os.Stdout, gendTestFile) //
+	genTestTemplate.Execute(outTestLog, struct {
 		Timestamp  time.Time
 		Escs       map[string]map[string]escStrData
 		Loglevels  []logLevelData
@@ -208,6 +212,14 @@ func FindTypes(n ast.Node) ast.Visitor {
 						level := strings.TrimPrefix(name.Name, "Level")
 						if _, ok := cMap["long"]; !ok {
 							cMap["long"] = level
+						}
+
+						if cMap["short"] == "-" {
+							cMap["short"] = ""
+						}
+
+						if cMap["long"] == "-" {
+							cMap["long"] = ""
 						}
 						p, f, ln := true, true, true
 						if fnValues, ok := cMap["fn"]; ok {
@@ -321,13 +333,16 @@ func exprToStr(a ast.Expr) (out string) {
 }
 
 func levelTypeStr(a string, b logLevelData) string {
+	if len(b.Long) == 0 {
+		return ""
+	}
 	switch a {
 	case "LevelLongStr":
-		return b.Long + ":"
+		return b.Long + ": "
 	case "LevelShortStr":
-		return b.Short
+		return b.Short + " "
 	case "LevelShortBracketStr":
-		return "[" + b.Short + "]"
+		return "[" + b.Short + "] "
 	}
 	return "-unknown-"
 }
@@ -346,6 +361,7 @@ package logger
 
 import (
 	"sync"
+	"net/http"
 )
 
 // Logger the main interface
@@ -364,6 +380,7 @@ type Logger interface {
 	Color(colorType) Logger
 	Field(string, interface{}) Logger
 	Fields(map[string]interface{}) Logger
+	HTTPMiddleware(http.Handler) http.Handler
 	NoColor() Logger
 	OnErr(error) Logger
 	Suppress(logLevel) Logger
@@ -377,7 +394,7 @@ func (ll logLevel) ToString(kind levelType) string {
 		switch ll {
 		{{- range $idx2, $value2 := $.Loglevels  }}
 		case {{$value2.Constant}}:
-			return "{{lt_str $value1 $value2}} "
+			return "{{lt_str $value1 $value2}}"
 		{{- end}}
 		}
 	{{- end}}
@@ -411,6 +428,9 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 		level:       {{$value.Constant}},
 		levelStr:    l.levelStr({{$value.Constant}}),
 		values:      v,
+		{{- if (eq $value.Long "Panic") }}
+		panicCh:     make(chan string, 1),
+		{{ end -}}
 		wg:          &sync.WaitGroup{},
 	}
 
@@ -437,6 +457,10 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 	ctx.wg.Add(1)
 	l.to <- ctx
 	ctx.wg.Wait()
+	{{- if (eq $value.Long "Panic") }}
+	// firing the panic from here, so it's not swallowed by the go routine
+	panic(<-ctx.panicCh)
+	{{ end -}}
 }
 {{ end }}
 {{ if $value.AsPrintf }}
@@ -452,6 +476,9 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 		level:       {{$value.Constant}},
 		levelStr:    l.levelStr({{$value.Constant}}),
 		values:      make([]interface{}, 0, len(v) * 2),
+		{{- if (eq $value.Long "Panic") }}
+		panicCh:     make(chan string, 1),
+		{{ end -}}
 		wg:          &sync.WaitGroup{},
 	}
 
@@ -479,6 +506,10 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 	ctx.wg.Add(1)
 	l.to <- ctx
 	ctx.wg.Wait()
+	{{- if (eq $value.Long "Panic") }}
+	// firing the panic from here, so it's not swallowed by the go routine
+	panic(<-ctx.panicCh)
+	{{ end -}}
 }
 {{ end }}
 {{ if $value.AsPrintln }}
@@ -488,11 +519,18 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 	}
 	ctx := context{
 		is:          asPrintln,
+		{{- if (eq $value.Constant "LevelHTTP") }}
+		tsStrCh:     tsChanText(""), // sending back empty text only for HTTPln, because we don't want to display it
+		{{- else}}
 		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		{{- end }}
 		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
 		level:       {{$value.Constant}},
 		levelStr:    l.levelStr({{$value.Constant}}),
 		values:      make([]interface{}, 0, len(v) * 2),
+		{{- if (eq $value.Long "Panic") }}
+		panicCh:     make(chan string, 1),
+		{{ end -}}
 		wg:          &sync.WaitGroup{},
 	}
 
@@ -525,6 +563,10 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 	ctx.wg.Add(1)
 	l.to <- ctx
 	ctx.wg.Wait()
+	{{- if (eq $value.Long "Panic") }}
+	// firing the panic from here, so it's not swallowed by the go routine
+	panic(<-ctx.panicCh)
+	{{ end -}}
 }
 {{- end -}}
 {{ end}}
@@ -540,13 +582,15 @@ func (l nilLogger) {{$value.Level}}f(format string, v ...interface{}) {}
 func (l nilLogger) {{$value.Level}}ln(v ...interface{})               {}
 {{- end -}}
 {{- end}}
-func (l nilLogger) Color(colorType) Logger                 { return l }
-func (l nilLogger) Field(string, interface{}) Logger       { return l }
-func (l nilLogger) Fields(map[string]interface{}) Logger   { return l }
-func (l nilLogger) NoColor() Logger                        { return l }
-func (l nilLogger) OnErr(error) Logger                     { return l }
-func (l nilLogger) Suppress(logLevel) Logger               { return l }
-func (l nilLogger) With(...optFunc) Logger                 { return l }
+func (l nilLogger) Color(colorType) Logger               { return l }
+func (l nilLogger) Field(string, interface{}) Logger     { return l }
+func (l nilLogger) Fields(map[string]interface{}) Logger { return l }
+func (l nilLogger) NoColor() Logger                      { return l }
+func (l nilLogger) OnErr(error) Logger                   { return l }
+func (l nilLogger) Suppress(logLevel) Logger             { return l }
+func (l nilLogger) With(...optFunc) Logger               { return l }
+
+func (l nilLogger) HTTPMiddleware(h http.Handler) http.Handler { return h }
 
 {{ range $key, $value1 := .Escs}}
 func (t {{$key}}) ESCStr() string {
@@ -641,6 +685,11 @@ var genTestTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// g
 	func TestNilLoggerFields(t *testing.T) {
 		l := new(nilLogger)
 		l.Fields(map[string]interface{}{"nothing": "to see here"})
+	}
+	
+	func TestNilLoggerHTTPMiddleware(t *testing.T) {
+		l := new(nilLogger)
+		l.HTTPMiddleware(nil)
 	}
 
 	func TestNilLoggerNoColor(t *testing.T) {

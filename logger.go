@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"regexp"
 	"sort"
@@ -14,12 +15,14 @@ import (
 )
 
 type (
-	logLevel   uint8
+	logLevel   uint16
 	colorType  uint8
 	printType  uint8
 	levelType  uint8
 	formatType uint8
 )
+
+type HTTPLogFormatFunc func(int, int64, string, *http.Request) string
 
 // ESCStringer is an interface for values that write escape codes.
 type ESCStringer interface {
@@ -37,6 +40,7 @@ const (
 	LevelTrace                      //`short:"TRC" color:"blue"`
 	LevelFatal                      //`short:"FAT" color:"red"`
 	LevelPanic                      //`short:"PAN" color:"red"`
+	LevelHTTP                       //`short:"-" long:"-" color:"green" fn:"ln"`
 )
 
 // The levelType int repressentations which determine how the log level will be displayed.
@@ -97,7 +101,8 @@ type context struct {
 	values    []interface{}
 	kvMap     map[string]interface{}
 
-	wg *sync.WaitGroup
+	panicCh chan string
+	wg      *sync.WaitGroup
 }
 
 // nilLogger is a logger that does nothing...
@@ -122,6 +127,9 @@ type baseLogger struct {
 	hasFilter bool
 	kv        map[string]interface{}
 	color     colorType
+
+	httpk         []string
+	httpLogFormat HTTPLogFormatFunc
 
 	marshal func(interface{}) ([]byte, error)
 	fatal   func(i int)
@@ -195,6 +203,8 @@ func New(opts ...optFunc) Logger {
 
 			// write the time slug and log level
 			buf.WriteString(<-logg.tsStrCh)
+			tsChanPool.Put(logg.tsStrCh)
+
 			buf.WriteString(string(logg.colors[colorIdx].ESCStr()))
 			buf.WriteString(logg.levelStr)
 			lenPoint1 = buf.Len()
@@ -219,7 +229,7 @@ func New(opts ...optFunc) Logger {
 
 			// panic if it's the correct log type
 			if logg.level == LevelPanic {
-				panic(buf.String())
+				logg.panicCh <- buf.String()
 			}
 
 			// always end on a newline
@@ -246,7 +256,6 @@ func New(opts ...optFunc) Logger {
 
 			// reset things and move on!
 			buf.Reset()
-			tsChanPool.Put(logg.tsStrCh)
 			logg.wg.Done()
 		}
 	}()
@@ -341,6 +350,13 @@ func itoa(buf *[20]byte, i int, wid int, start int) {
 	// i < 10
 	b[bp] = byte('0' + i)
 	copy((*buf)[start:], b[bp:])
+}
+
+//tsChantsChanEmpty is a function that returns an empty string for the time
+func tsChanText(text string) chan string {
+	ch := tsChanPool.Get().(chan string)
+	go func() { ch <- text }()
+	return ch
 }
 
 // tsChan is a function that returns a formated current timestamp, unless
@@ -469,6 +485,12 @@ func WithOutput(w io.Writer) optFunc {
 	}
 }
 
+func WithHTTPHeader(header ...string) optFunc {
+	return func(l *baseLogger) {
+		l.httpk = append(l.httpk, header...)
+	}
+}
+
 // WithKVMarshaler uses the standard marshal interface to format the structured logging values,
 // it works with standard JSON and XML marshalers.
 func WithKVMarshaler(fn func(interface{}) ([]byte, error)) optFunc {
@@ -575,4 +597,82 @@ func (nw netwriter) Write(p []byte) (int, error) {
 	defer conn.Close()
 
 	return conn.Write(p)
+}
+
+type ResponseWriter struct {
+	http.ResponseWriter
+	status int
+	sent   int64
+}
+
+func (c *ResponseWriter) Write(p []byte) (n int, err error) {
+	n, err = c.ResponseWriter.Write(p)
+	c.sent += int64(n)
+	return
+}
+
+func (c *ResponseWriter) WriteHeader(code int) {
+	c.status = code
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (l *baseLogger) HTTPMiddleware(next http.Handler) http.Handler {
+	// set the default http logger if it's nil
+	if l.httpLogFormat == nil {
+		l.httpLogFormat = CommonLogFormat
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cw := &ResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(cw, r)
+
+		if len(l.httpk) > 0 {
+			httpkv := make(map[string]interface{})
+			for _, k := range l.httpk {
+				httpkv[k] = r.Header.Get(k)
+			}
+			l.Fields(httpkv).HTTPln(l.httpLogFormat(cw.status, cw.sent, l.tsText, r))
+			return
+		}
+
+		l.HTTPln(l.httpLogFormat(cw.status, cw.sent, l.tsText, r))
+	})
+}
+
+// CommonLogFormat is the Apache Common Logging format used for logging HTTP requests
+func CommonLogFormat(status int, sent int64, tsText string, r *http.Request) string {
+	// $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" | nginx
+	// 127.0.0.1 user-identifier frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326
+
+	if len(tsText) == 0 {
+		tsText = time.Now().Format("02/Jan/2006:15:04:05 -0700")
+	}
+
+	commonLog := struct {
+		RemoteAddr    string `json:"remote_address"`
+		RemoteId      string `json:"remote_identifier"`
+		RemoteUser    string `json:"remote_user"`
+		LocalTime     string `json:"time_local"`
+		RequestString string `json:"request"`
+		Status        int    `json:"status"`
+		BytesSent     int64  `json:"body_bytes_sent"`
+		Referer       string `json:"http_referer"`
+		UserAgent     string `json:"http_user_agent"`
+	}{
+		RemoteAddr:    r.RemoteAddr,
+		RemoteId:      "-",
+		RemoteUser:    "-",
+		LocalTime:     tsText,
+		RequestString: fmt.Sprintf("%s %s %s", r.Method, r.URL, r.Proto),
+		Status:        status,
+		BytesSent:     sent,
+		Referer:       r.Referer(),
+		UserAgent:     r.UserAgent(),
+	}
+
+	return fmt.Sprintf("%s %s %s [%s] \"%s\" %d %d %s %s", commonLog.RemoteAddr,
+		commonLog.RemoteId, commonLog.RemoteUser,
+		commonLog.LocalTime, commonLog.RequestString,
+		commonLog.Status, commonLog.BytesSent,
+		commonLog.Referer, commonLog.UserAgent)
 }
