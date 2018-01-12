@@ -22,6 +22,7 @@ type (
 	formatType uint8
 )
 
+// HTTPLogFormatFunc is the type that is used for logging HTTP requests
 type HTTPLogFormatFunc func(int, int64, string, *http.Request) string
 
 // ESCStringer is an interface for values that write escape codes.
@@ -485,6 +486,7 @@ func WithOutput(w io.Writer) optFunc {
 	}
 }
 
+// WithHTTPHeader sets a HTTP header to be captured from the HTTPMiddleware handler
 func WithHTTPHeader(header ...string) optFunc {
 	return func(l *baseLogger) {
 		l.httpk = append(l.httpk, header...)
@@ -601,75 +603,73 @@ func (nw netwriter) Write(p []byte) (int, error) {
 
 // StripWriter wraps a writer that will strip out some VT100 escape codes
 func StripWriter(w io.Writer) io.Writer {
-	return escstripwritter{w: w}
+	return stripescwriter{w: w}
 }
 
-// escstripwritter the underling struct that will strip out escape characters
-type escstripwritter struct {
-	state func(*escstripwritter, byte) bool
+// stripescwriter the underling struct that will strip out escape characters
+type stripescwriter struct {
+	state func(*stripescwriter, byte) bool
 	w     io.Writer
 }
 
 // StBracket returns the next states after a bracket is found
-func (es *escstripwritter) StBracket(b byte) bool {
+func (se *stripescwriter) StBracket(b byte) bool {
 	switch b {
 	case '[':
-		es.state = (*escstripwritter).StCode
+		se.state = (*stripescwriter).StCode
 		return false
 	}
-	es.state = nil
+	se.state = nil
 	return false
 }
 
 // StBracket returns the next states after a number or 'm' is found
-func (es *escstripwritter) StCode(b byte) bool {
+func (se *stripescwriter) StCode(b byte) bool {
 	switch b {
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		return false
 	case 'm':
-		es.state = (*escstripwritter).StDone
+		se.state = (*stripescwriter).StDone
 		return false
 	}
-	es.state = nil
+	se.state = nil
 	return false
 }
 
 // StDone stops the machine and returns that its completed successfully
-func (es *escstripwritter) StDone(b byte) bool {
-	es.state = nil
+func (se *stripescwriter) StDone(b byte) bool {
+	se.state = nil
 	return true
 }
 
 // Write looks for the escape character and strips out any codes via a simple state machine.
 // This may flush to the underlining writer more than once.
-func (es escstripwritter) Write(p []byte) (n int, err error) {
+func (se stripescwriter) Write(p []byte) (n int, err error) {
 	var start int
 	for i, b := range p {
-		if es.state == nil && b == 0x1b {
-			es.state = (*escstripwritter).StBracket
-			x, err := es.Write(p[start:i])
-			n += x
-			err = err
+		if se.state == nil && b == 0x1b {
+			se.state = (*stripescwriter).StBracket
+			n2, err2 := se.Write(p[start:i])
+			n, err = n+n2, err2
 			continue
 		}
-		if es.state == nil {
+		if se.state == nil {
 			continue
 		}
-		drop := es.state(&es, b)
-		if es.state == nil && drop {
+		drop := se.state(&se, b)
+		if se.state == nil && drop {
 			start = i
 			continue
 		}
 	}
-	if es.state == nil {
-		x, err := es.w.Write(p[start:])
-		n += x
-		err = err
+	if se.state == nil {
+		n2, err2 := se.w.Write(p[start:])
+		n, err = n+n2, err2
 	}
-	return
+	return n, err
 }
 
-// ResponseWriter holds an embeded HTTP ResponseWriter but will capture the status
+// ResponseWriter holds an embedded HTTP ResponseWriter but will capture the status
 // and number of bytes sent so they can be logged.
 type ResponseWriter struct {
 	http.ResponseWriter

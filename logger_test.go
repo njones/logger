@@ -606,6 +606,8 @@ func TestSuppressOutput(t *testing.T) {
 
 func TestNetOutput(t *testing.T) {
 	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
+	errHave := new(bytes.Buffer)
+
 	haveCh := make(chan string, 1)
 
 	cont := make(chan struct{}, 1)
@@ -650,7 +652,9 @@ func TestNetOutput(t *testing.T) {
 	}()
 	<-cont
 
-	l := New(WithOutput(NetWriter("tcp", ":5550")), WithTimeText("TEST"))
+	errWant1 := ""
+
+	l := New(WithOutput(NetWriter("tcp", ":5550")), WithTimeText("TEST"), withStdErr(errHave))
 	l.Infoln("This", "is a", "simple", "test")
 
 	have := <-haveCh
@@ -659,32 +663,36 @@ func TestNetOutput(t *testing.T) {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have)
 	}
 
-	errWant := []string{
+	if errWant1 != errHave.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant1, errHave.String())
+	}
+
+	errWant2 := []string{
 		"error writing to log: dial abc: unknown network abc\n",
 		"error writing to log: dial abc: unknown network abc\n",
 		"error writing to log: dial abc: unknown network abc\n",
 	}
-	errHave := new(bytes.Buffer)
 
+	errHave.Reset()
 	l2 := New(WithOutput(NetWriter("abc", "123")), WithTimeText("TEST"), withStdErr(errHave))
 	l2.Infoln("This", "is a", "simple", "test")
 
-	if errWant[0] != errHave.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant[0], errHave.String())
+	if errWant2[0] != errHave.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant2[0], errHave.String())
 	}
 
 	errHave.Reset()
 	l2.Infof("This %s %s %s", "is a", "simple", "test")
 
-	if errWant[1] != errHave.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant[1], errHave.String())
+	if errWant2[1] != errHave.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant2[1], errHave.String())
 	}
 
 	errHave.Reset()
 	l2.Print("This is a simple test")
 
-	if errWant[2] != errHave.String() {
-		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant[2], errHave.String())
+	if errWant2[2] != errHave.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", errWant2[2], errHave.String())
 	}
 }
 
