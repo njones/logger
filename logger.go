@@ -599,23 +599,103 @@ func (nw netwriter) Write(p []byte) (int, error) {
 	return conn.Write(p)
 }
 
+// StripWriter wraps a writer that will strip out some VT100 escape codes
+func StripWriter(w io.Writer) io.Writer {
+	return escstripwritter{w: w}
+}
+
+// escstripwritter the underling struct that will strip out escape characters
+type escstripwritter struct {
+	state func(*escstripwritter, byte) bool
+	w     io.Writer
+}
+
+// StBracket returns the next states after a bracket is found
+func (es *escstripwritter) StBracket(b byte) bool {
+	switch b {
+	case '[':
+		es.state = (*escstripwritter).StCode
+		return false
+	}
+	es.state = nil
+	return false
+}
+
+// StBracket returns the next states after a number or 'm' is found
+func (es *escstripwritter) StCode(b byte) bool {
+	switch b {
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return false
+	case 'm':
+		es.state = (*escstripwritter).StDone
+		return false
+	}
+	es.state = nil
+	return false
+}
+
+// StDone stops the machine and returns that its completed successfully
+func (es *escstripwritter) StDone(b byte) bool {
+	es.state = nil
+	return true
+}
+
+// Write looks for the escape character and strips out any codes via a simple state machine.
+// This may flush to the underlining writer more than once.
+func (es escstripwritter) Write(p []byte) (n int, err error) {
+	var start int
+	for i, b := range p {
+		if es.state == nil && b == 0x1b {
+			es.state = (*escstripwritter).StBracket
+			x, err := es.Write(p[start:i])
+			n += x
+			err = err
+			continue
+		}
+		if es.state == nil {
+			continue
+		}
+		drop := es.state(&es, b)
+		if es.state == nil && drop {
+			start = i
+			continue
+		}
+	}
+	if es.state == nil {
+		x, err := es.w.Write(p[start:])
+		n += x
+		err = err
+	}
+	return
+}
+
+// ResponseWriter holds an embeded HTTP ResponseWriter but will capture the status
+// and number of bytes sent so they can be logged.
 type ResponseWriter struct {
 	http.ResponseWriter
 	status int
 	sent   int64
 }
 
+// Write writes to the underlining write, while counting the number of bytes that pass through
 func (c *ResponseWriter) Write(p []byte) (n int, err error) {
+	if c.status == 0 {
+		c.WriteHeader(http.StatusOK) // is so that it acts like the http.ResponseWriter Write([]byte): https://golang.org/pkg/net/http/#ResponseWriter
+	}
 	n, err = c.ResponseWriter.Write(p)
 	c.sent += int64(n)
 	return
 }
 
+// WriteHeader captures the status code.
+// If WriteHeader is not called explicitly, the first call to Write
+// will trigger an implicit WriteHeader(http.StatusOK).
 func (c *ResponseWriter) WriteHeader(code int) {
 	c.status = code
 	c.ResponseWriter.WriteHeader(code)
 }
 
+// HTTPMiddleware is a middleware handler that will log HTTP server requests
 func (l *baseLogger) HTTPMiddleware(next http.Handler) http.Handler {
 	// set the default http logger if it's nil
 	if l.httpLogFormat == nil {

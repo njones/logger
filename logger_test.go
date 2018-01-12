@@ -742,36 +742,17 @@ func TestHttpHandlerOutput(t *testing.T) {
 	l2.Info(wantBody)
 }
 
-// TODO(njones): maybe not this exact thing, but something close
-// func TestFilteredByteOutput(t *testing.T) {
-// 	base := "TEST \x1b[32m Info: This is a simple test [1] \x1b[0m\nTEST \x1b[32m Info: This is a simple test [2] \x1b[0m\n"
-// 	want := "TEST Info: This is a simple test [1] \nTEST Info: This is a simple test [2] \n"
-// 	have := new(bytes.Buffer)
+func TestWithNoColorOutput(t *testing.T) {
+	want := "TEST Info: This is a simple test\n"
+	have := new(bytes.Buffer)
 
-// 	fw := &filteredByteWriter{w: have, fn: noColorOutputFunc}
+	l := New(WithOutput(StripWriter(have)), WithTimeText("TEST"))
+	l.Info("This is a simple test")
 
-// 	for i := 0; i < len(base); i += 3 {
-// 		fw.Write([]byte(base[i : i+3]))
-// 	}
-// 	fw.Flush()
-
-// 	if want != have.String() {
-// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
-// 	}
-// }
-
-// TODO(njones): implement this with the new logger code
-// func TestWithNoColorOutput(t *testing.T) {
-// 	want := "TEST Info: This is a simple test \n"
-// 	have := new(bytes.Buffer)
-
-// 	l := New(WithNoColorOutput(have), WithTimeText("TEST"))
-// 	l.Info("This is a simple test")
-
-// 	if want != have.String() {
-// 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
-// 	}
-// }
+	if want != have.String() {
+		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+	}
+}
 
 func TestPrintOutput(t *testing.T) {
 	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
