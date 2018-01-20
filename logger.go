@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	isatty "github.com/mattn/go-isatty"
 )
 
 type (
@@ -326,7 +328,7 @@ func (l *baseLogger) Fields(kv map[string]interface{}) Logger {
 }
 
 // tsChanPool is a sync pool for sending formatted time back
-// formating the time takes a while, so try to concurrently
+// formatting the time takes a while, so try to concurrently
 // format to help things look faster
 var tsChanPool = sync.Pool{
 	New: func() interface{} {
@@ -353,7 +355,7 @@ func itoa(buf *[20]byte, i int, wid int, start int) {
 	copy((*buf)[start:], b[bp:])
 }
 
-//tsChantsChanEmpty is a function that returns an empty string for the time
+//tsChantsChanEmpty is a function that returns the passed in text string as the time
 func tsChanText(text string) chan string {
 	ch := tsChanPool.Get().(chan string)
 	go func() { ch <- text }()
@@ -362,13 +364,13 @@ func tsChanText(text string) chan string {
 
 // tsChan is a function that returns a formated current timestamp, unless
 // the format is overwritten, or a standard time is used
-func tsChan(tss *time.Time, isUTC bool, owFmt string, format string) chan string {
+func tsChan(text string, format string, tss *time.Time, isUTC bool) chan string {
 	ch := tsChanPool.Get().(chan string)
 
 	go func() {
 		// overwrite the formatting to be static text
-		if len(owFmt) > 0 {
-			ch <- owFmt + " "
+		if len(text) > 0 {
+			ch <- text + " "
 			return
 		}
 
@@ -432,15 +434,15 @@ func StdKVMarshal(in interface{}) ([]byte, error) {
 	switch val := in.(type) {
 	case map[string]interface{}:
 		for k, v := range val {
-			switch vval := v.(type) {
+			switch vt := v.(type) {
 			case string:
-				rtns = append(rtns, fmt.Sprintf("%s=%s", k, vval))
+				rtns = append(rtns, fmt.Sprintf("%s=%s", k, vt))
 			case int, int8, int16, int32, int64,
 				uint, uint8, uint16, uint32, uint64,
 				float64:
-				rtns = append(rtns, fmt.Sprintf("%s=%d", k, vval))
+				rtns = append(rtns, fmt.Sprintf("%s=%d", k, vt))
 			default:
-				rtns = append(rtns, fmt.Sprintf("%s=%v", k, vval))
+				rtns = append(rtns, fmt.Sprintf("%s=%v", k, vt))
 			}
 		}
 	}
@@ -478,10 +480,19 @@ func WithTimeFormat(format string) optFunc {
 	}
 }
 
+type WriterToFileDescriptor interface {
+	Fd() uintptr
+}
+
 // WithOutput adds a writer to be output, it overwrites sdtout the first time used, but then
 // appends after.
 func WithOutput(w io.Writer) optFunc {
 	return func(l *baseLogger) {
+		if ofd, ok := w.(WriterToFileDescriptor); ok {
+			if !isatty.IsTerminal(ofd.Fd()) && !isatty.IsCygwinTerminal(ofd.Fd()) {
+				w = StripWriter(w)
+			}
+		}
 		l.o = append(l.o, w)
 	}
 }

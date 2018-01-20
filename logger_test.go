@@ -63,7 +63,7 @@ func TestMultipleOutput(t *testing.T) {
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{})
-	l := New(WithOutput(have), WithTimeText("TEST"))
+	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Println, l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
 		have.Reset()
 		lg("This is", "a test")

@@ -423,7 +423,7 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 	}
 	ctx := context{
 		is:          asPrint,
-		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		tsStrCh:     tsChan(l.tsText, l.tsFormat, l.ts, l.tsIsUTC),
 		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
 		level:       {{$value.Constant}},
 		levelStr:    l.levelStr({{$value.Constant}}),
@@ -461,6 +461,9 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 	// firing the panic from here, so it's not swallowed by the go routine
 	panic(<-ctx.panicCh)
 	{{ end -}}
+	{{- if (eq $value.Long "Fatal") }}
+	l.fatal(1)
+	{{ end -}}
 }
 {{ end }}
 {{ if $value.AsPrintf }}
@@ -470,7 +473,7 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 	}
 	ctx := context{
 		is:          asPrintf,
-		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		tsStrCh:     tsChan(l.tsText, l.tsFormat, l.ts, l.tsIsUTC),
 		formatStr:   format,
 		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
 		level:       {{$value.Constant}},
@@ -510,6 +513,9 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 	// firing the panic from here, so it's not swallowed by the go routine
 	panic(<-ctx.panicCh)
 	{{ end -}}
+	{{- if (eq $value.Long "Fatal") }}
+	l.fatal(1)
+	{{ end -}}
 }
 {{ end }}
 {{ if $value.AsPrintln }}
@@ -522,7 +528,7 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 		{{- if (eq $value.Constant "LevelHTTP") }}
 		tsStrCh:     tsChanText(""), // sending back empty text only for HTTPln, because we don't want to display it
 		{{- else}}
-		tsStrCh:     tsChan(l.ts, l.tsIsUTC, l.tsText, l.tsFormat),
+		tsStrCh:     tsChan(l.tsText, l.tsFormat, l.ts, l.tsIsUTC),
 		{{- end }}
 		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},
 		level:       {{$value.Constant}},
@@ -566,6 +572,9 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 	{{- if (eq $value.Long "Panic") }}
 	// firing the panic from here, so it's not swallowed by the go routine
 	panic(<-ctx.panicCh)
+	{{ end -}}
+	{{- if (eq $value.Long "Fatal") }}
+	l.fatal(1)
 	{{ end -}}
 }
 {{- end -}}
@@ -623,7 +632,7 @@ var genTestTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// g
 		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
 		have := new(bytes.Buffer)
-		l := New(WithOutput(have), WithTimeText("TEST"))
+		l := New(WithOutput(have), WithTimeText("TEST"){{- if (eq $value.Long "Fatal") }}, withFatal{{ end -}})
 		l.{{$value.Level}}("This ", "is ", "an ", "automated ", "test")
 
 		if want != have.String() {
@@ -635,7 +644,7 @@ var genTestTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// g
 		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
 		have := new(bytes.Buffer)
-		l := New(WithOutput(have), WithTimeText("TEST"))
+		l := New(WithOutput(have), WithTimeText("TEST"){{- if (eq $value.Long "Fatal") }}, withFatal{{ end -}})
 		l.{{$value.Level}}f("This is an %s test", "automated")
 
 		if want != have.String() {
@@ -647,7 +656,7 @@ var genTestTemplate = template.Must(template.New("").Funcs(funcMap).Parse(`	// g
 		want := "TEST {{ (index (index $.Escs "colorType") $colorType).EscValue }}{{$value.Long}}: This is an automated test\x1b[0m\n"
 
 		have := new(bytes.Buffer)
-		l := New(WithOutput(have), WithTimeText("TEST"))
+		l := New(WithOutput(have), WithTimeText("TEST"){{- if (eq $value.Long "Fatal") }}, withFatal{{ end -}})
 		l.{{$value.Level}}ln("This", "is", "an", "automated", "test")
 
 		if want != have.String() {
