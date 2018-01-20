@@ -136,6 +136,7 @@ type baseLogger struct {
 
 	marshal func(interface{}) ([]byte, error)
 	fatal   func(i int)
+	fatali  int
 }
 
 // KVStruct is a public struct that represents key value pairs, which can
@@ -165,6 +166,7 @@ func New(opts ...optFunc) Logger {
 	l.marshal = StdKVMarshal
 	l.color = UnkColor - 1
 	l.fatal = func(i int) { os.Exit(i) } // so we can test fatal
+	l.fatali = 1
 
 	// apply defaults
 	for _, opt := range opts {
@@ -266,31 +268,6 @@ func New(opts ...optFunc) Logger {
 	return l
 }
 
-// With adds options to a logger and returns a new logger with those options
-func (l *baseLogger) With(options ...optFunc) Logger {
-	wl := copyBaseLogger(l)
-	for _, opt := range options {
-		opt(wl)
-	}
-	return wl
-}
-
-// Suppress takes a bitwise OR (|) of the different levels to suppress
-// to Unsupress set to 0,
-func (l *baseLogger) Suppress(loglevels logLevel) Logger {
-	sl := copyBaseLogger(l)
-	sl.skip = loglevels
-	return sl
-}
-
-// OnErr displays the log line only if the error err is not nil.
-func (l *baseLogger) OnErr(err error) Logger {
-	if err == nil {
-		return nilLogger{}
-	}
-	return l
-}
-
 // Color changes the color escape codes of a single log line. Use the colorType constants as the
 // method paramteter. Save to a new log variable to keep the color options across log calls.
 func (l *baseLogger) Color(color colorType) Logger {
@@ -300,8 +277,12 @@ func (l *baseLogger) Color(color colorType) Logger {
 	return cl
 }
 
-// NoColor is a convenience method that removes the color escape codes from a log line.
-func (l *baseLogger) NoColor() Logger { return l.Color(UnkColor) }
+func (l *baseLogger) FatalInt(i int) Logger {
+	// return a copy of the base logger, but with the fatal int filled in
+	fil := copyBaseLogger(l)
+	fil.fatali = i
+	return fil
+}
 
 // Field adds a single key, value pair to a single log line.
 func (l *baseLogger) Field(key string, value interface{}) Logger {
@@ -325,6 +306,34 @@ func (l *baseLogger) Fields(kv map[string]interface{}) Logger {
 	kvl := copyBaseLogger(l)
 	kvl.kv = kv
 	return kvl
+}
+
+// NoColor is a convenience method that removes the color escape codes from a log line.
+func (l *baseLogger) NoColor() Logger { return l.Color(UnkColor) }
+
+// OnErr displays the log line only if the error err is not nil.
+func (l *baseLogger) OnErr(err error) Logger {
+	if err == nil {
+		return nilLogger{}
+	}
+	return l
+}
+
+// Suppress takes a bitwise OR (|) of the different levels to suppress
+// to Unsupress set to 0,
+func (l *baseLogger) Suppress(loglevels logLevel) Logger {
+	sl := copyBaseLogger(l)
+	sl.skip = loglevels
+	return sl
+}
+
+// With adds options to a logger and returns a new logger with those options
+func (l *baseLogger) With(options ...optFunc) Logger {
+	wl := copyBaseLogger(l)
+	for _, opt := range options {
+		opt(wl)
+	}
+	return wl
 }
 
 // tsChanPool is a sync pool for sending formatted time back

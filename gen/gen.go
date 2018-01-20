@@ -378,6 +378,7 @@ type Logger interface {
 {{- end -}}
 {{end}}
 	Color(colorType) Logger
+	FatalInt(int) Logger
 	Field(string, interface{}) Logger
 	Fields(map[string]interface{}) Logger
 	HTTPMiddleware(http.Handler) http.Handler
@@ -462,7 +463,7 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 	panic(<-ctx.panicCh)
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
-	l.fatal(1)
+	l.fatal(l.fatali)
 	{{ end -}}
 }
 {{ end }}
@@ -514,7 +515,7 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 	panic(<-ctx.panicCh)
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
-	l.fatal(1)
+	l.fatal(l.fatali)
 	{{ end -}}
 }
 {{ end }}
@@ -574,7 +575,7 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 	panic(<-ctx.panicCh)
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
-	l.fatal(1)
+	l.fatal(l.fatali)
 	{{ end -}}
 }
 {{- end -}}
@@ -598,6 +599,7 @@ func (l nilLogger) NoColor() Logger                      { return l }
 func (l nilLogger) OnErr(error) Logger                   { return l }
 func (l nilLogger) Suppress(logLevel) Logger             { return l }
 func (l nilLogger) With(...optFunc) Logger               { return l }
+func (l nilLogger) FatalInt(int) Logger                  { return l }
 
 func (l nilLogger) HTTPMiddleware(h http.Handler) http.Handler { return h }
 

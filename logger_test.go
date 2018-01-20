@@ -115,6 +115,23 @@ func TestMultipleShortOutput(t *testing.T) {
 	}
 }
 
+func TestFatalInt(t *testing.T) {
+	ch := make(chan int, 1)
+	withFatalInt := func(l *baseLogger) {
+		l.fatal = func(i int) { ch <- i }
+	}
+
+	want := 4
+
+	l := New(WithOutput(ioutil.Discard), withFatalInt)
+	l.FatalInt(want).Fatal("Doesn't Matter...")
+
+	have := <-ch
+	if want != have {
+		t.Errorf("\nwant: %d have: %d\n", want, have)
+	}
+}
+
 func TestWithOutput(t *testing.T) {
 	want1 := []string{
 		"TEST \x1b[32m[INF] This is a test\x1b[0m\n",
