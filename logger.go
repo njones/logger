@@ -32,6 +32,9 @@ type ESCStringer interface {
 	ESCStr() string
 }
 
+// Return is the return of the Logger interface methods that don't return Logger
+type Return struct{ HasErr bool }
+
 // The logLevel int representations of the different logging levels and related
 // information that can be programmatically generated for colors and display values.
 const (
@@ -64,7 +67,7 @@ const (
 // Escape codes integer values for formatting and colors - the escape sequences
 // are auto-generated.
 const (
-	UnkSeq   formatType = 255
+	SeqUnk   formatType = 255
 	SeqReset formatType = iota
 	SeqBright
 	SeqDim
@@ -75,7 +78,7 @@ const (
 	SeqReverse
 	SeqHidden
 
-	UnkColor   colorType = 255
+	ColorUnk   colorType = 255
 	ColorBlack colorType = iota + 30
 	ColorRed
 	ColorGreen
@@ -137,6 +140,8 @@ type baseLogger struct {
 	marshal func(interface{}) ([]byte, error)
 	fatal   func(i int)
 	fatali  int
+
+	hasErr bool
 }
 
 // KVStruct is a public struct that represents key value pairs, which can
@@ -155,8 +160,6 @@ type optFunc func(*baseLogger)
 // New returns a Logger interface that exposes the same as the standard logger
 // along with level logging and other options.
 func New(opts ...optFunc) Logger {
-	var err error
-
 	l := new(baseLogger)
 	l.o = make([]io.Writer, 0, 5)
 	l.tsFormat = "std"
@@ -164,7 +167,7 @@ func New(opts ...optFunc) Logger {
 	l.stderr = os.Stderr
 	l.logLevel = LevelLongStr
 	l.marshal = StdKVMarshal
-	l.color = UnkColor - 1
+	l.color = ColorUnk - 1
 	l.fatal = func(i int) { os.Exit(i) } // so we can test fatal
 	l.fatali = 1
 
@@ -183,89 +186,95 @@ func New(opts ...optFunc) Logger {
 		l.to = make(chan context, 1000)
 	}
 
-	// the go routine that manages the log writing state (log line at a time)
-	go func() {
-		buf := new(bytes.Buffer)
-		var lenPoint1, lenPoint2 int
-		for logg := range l.to {
-
-			// marshal and format KV data
-			var kv []byte
-			if l.marshal != nil && logg.kvMap != nil && len(logg.kvMap) > 0 {
-				kv, err = l.marshal(logg.kvMap)
-				if err != nil {
-					fmt.Fprintf(l.stderr, "error marshaling: %v\n", err)
-					kv = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", logg.kvMap))
-				}
-				kv = append([]byte{' '}, kv...)
-			}
-
-			// add color info
-			colorIdx := 0
-			if logg.colors[1] != UnkColor-1 {
-				colorIdx = 1
-			}
-
-			// write the time slug and log level
-			buf.WriteString(<-logg.tsStrCh)
-			tsChanPool.Put(logg.tsStrCh)
-
-			buf.WriteString(string(logg.colors[colorIdx].ESCStr()))
-			buf.WriteString(logg.levelStr)
-			lenPoint1 = buf.Len()
-
-			// write the log line
-			switch logg.is {
-			case asPrint:
-				buf.WriteString(fmt.Sprint(logg.values...))
-			case asPrintf:
-				buf.WriteString(fmt.Sprintf(logg.formatStr, logg.values...))
-			case asPrintln:
-				// spacing was added manually...
-				buf.WriteString(fmt.Sprint(logg.values...))
-			}
-			lenPoint2 = buf.Len()
-
-			// add color information
-			buf.WriteString(string(logg.colors[2].ESCStr()))
-
-			// add marshaled KV data
-			buf.Write(kv)
-
-			// panic if it's the correct log type
-			if logg.level == LevelPanic {
-				logg.panicCh <- buf.String()
-			}
-
-			// always end on a newline
-			buf.WriteByte([]byte("\n")[0])
-
-			// write the log line to all io.Writers
-			if _, err := fmt.Fprint(l.stdout, buf.String()); err != nil {
-				fmt.Fprintln(l.stderr, "error writing to log:", err)
-			}
-
-			// if there are filters then call the Callback method to write
-			// data to a filtered io.Writer
-			if l.hasFilter {
-				logg.wg.Add(1)
-				go func(logln string, p1, p2 int) {
-					for _, w := range l.o {
-						if fw, ok := w.(filterwriter); ok {
-							fw.Callback(logln, p1, p2)
-						}
-					}
-					logg.wg.Done()
-				}(buf.String(), lenPoint1, lenPoint2)
-			}
-
-			// reset things and move on!
-			buf.Reset()
-			logg.wg.Done()
-		}
-	}()
+	// the go routine that manages writing out the log state (one line at a time)
+	go l.out()
 
 	return l
+}
+
+func (l *baseLogger) rtn() Return { return Return{HasErr: l.hasErr} }
+
+func (l *baseLogger) out() {
+	var err error
+
+	buf := new(bytes.Buffer)
+	var lenPoint1, lenPoint2 int
+	for logg := range l.to {
+
+		// marshal and format KV data
+		var kv []byte
+		if l.marshal != nil && logg.kvMap != nil && len(logg.kvMap) > 0 {
+			kv, err = l.marshal(logg.kvMap)
+			if err != nil {
+				fmt.Fprintf(l.stderr, "error marshaling: %v\n", err)
+				kv = []byte(fmt.Sprintf("[ERR logger.go (marshal)]: %#v", logg.kvMap))
+			}
+			kv = append([]byte{' '}, kv...)
+		}
+
+		// add color info
+		colorIdx := 0
+		if logg.colors[1] != ColorUnk-1 {
+			colorIdx = 1
+		}
+
+		// write the time slug and log level
+		buf.WriteString(<-logg.tsStrCh)
+		tsChanPool.Put(logg.tsStrCh)
+
+		buf.WriteString(string(logg.colors[colorIdx].ESCStr()))
+		buf.WriteString(logg.levelStr)
+		lenPoint1 = buf.Len()
+
+		// write the log line
+		switch logg.is {
+		case asPrint:
+			buf.WriteString(fmt.Sprint(logg.values...))
+		case asPrintf:
+			buf.WriteString(fmt.Sprintf(logg.formatStr, logg.values...))
+		case asPrintln:
+			// spacing was added manually...
+			buf.WriteString(fmt.Sprint(logg.values...))
+		}
+		lenPoint2 = buf.Len()
+
+		// add color information
+		buf.WriteString(string(logg.colors[2].ESCStr()))
+
+		// add marshaled KV data
+		buf.Write(kv)
+
+		// panic if it's the correct log type
+		if logg.level == LevelPanic {
+			logg.panicCh <- buf.String()
+		}
+
+		// always end on a newline
+		buf.WriteByte([]byte("\n")[0])
+
+		// write the log line to all io.Writers
+		if _, err := fmt.Fprint(l.stdout, buf.String()); err != nil {
+			fmt.Fprintln(l.stderr, "error writing to log:", err)
+		}
+
+		// if there are filters then call the Callback method to write
+		// data to a filtered io.Writer
+		if l.hasFilter {
+			logg.wg.Add(1)
+			go func(logln string, p1, p2 int) {
+				for _, w := range l.o {
+					if fw, ok := w.(filterwriter); ok {
+						fw.Callback(logln, p1, p2)
+					}
+				}
+				logg.wg.Done()
+			}(buf.String(), lenPoint1, lenPoint2)
+		}
+
+		// reset things and move on!
+		buf.Reset()
+		logg.wg.Done()
+	}
 }
 
 // Color changes the color escape codes of a single log line. Use the colorType constants as the
@@ -309,13 +318,14 @@ func (l *baseLogger) Fields(kv map[string]interface{}) Logger {
 }
 
 // NoColor is a convenience method that removes the color escape codes from a log line.
-func (l *baseLogger) NoColor() Logger { return l.Color(UnkColor) }
+func (l *baseLogger) NoColor() Logger { return l.Color(ColorUnk) }
 
 // OnErr displays the log line only if the error err is not nil.
 func (l *baseLogger) OnErr(err error) Logger {
 	if err == nil {
 		return nilLogger{}
 	}
+	l.hasErr = true
 	return l
 }
 

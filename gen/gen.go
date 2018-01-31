@@ -146,149 +146,154 @@ type VisitorFunc func(n ast.Node) ast.Visitor
 // Visit does the node walking
 func (f VisitorFunc) Visit(n ast.Node) ast.Visitor { return f(n) }
 
-// FindTypes loops through the nodes
-func FindTypes(n ast.Node) ast.Visitor {
+func findType_TypeSpec(node *ast.TypeSpec) ast.Visitor {
+	var s *ast.StructType
+	var ok bool
+	if s, ok = node.Type.(*ast.StructType); !ok {
+		return VisitorFunc(FindTypes)
+	}
+	if node.Name.Name != "baseLogger" {
+		return VisitorFunc(FindTypes)
+	}
+	for _, f := range s.Fields.List {
+		blFields = append(blFields, f.Names[0].Name)
+	}
+	return nil
+}
+
+func findType_GenDecl(n *ast.GenDecl) ast.Visitor {
+	if n.Tok != token.CONST {
+		return VisitorFunc(FindTypes)
+	}
 
 	var (
 		currType    string
 		currComment string
 		currValue   string
+
+		val int
+		err error
 	)
 
-	var val int
-	var err error
+	for _, spec := range n.Specs {
+		vspec := spec.(*ast.ValueSpec)
+		for _, name := range vspec.Names {
+			if ident, ok := vspec.Type.(*ast.Ident); ok {
+				currType = ident.Name
+			}
 
+			if comment := vspec.Comment; comment != nil {
+				for _, commGrp := range comment.List {
+					currComment = commGrp.Text // assume only one comment, otherwise we're overwritting here
+				}
+			}
+
+			if values := vspec.Values; values != nil {
+				for _, expression := range values {
+					currValue = exprToStr(expression)
+				}
+			}
+
+			raw := fmt.Sprintf("%s (%s:%q) = %s\n", name.Name, currType, currComment, currValue)
+
+			switch currType {
+			case "levelType":
+				leveltypes = append(leveltypes, name.Name)
+			case "logLevel":
+				cMap := commTagToMap(currComment)
+				level := strings.TrimPrefix(name.Name, "Level")
+				if _, ok := cMap["long"]; !ok {
+					cMap["long"] = level
+				}
+
+				if cMap["short"] == "-" {
+					cMap["short"] = ""
+				}
+
+				if cMap["long"] == "-" {
+					cMap["long"] = ""
+				}
+				p, f, ln := true, true, true
+				if fnValues, ok := cMap["fn"]; ok {
+					p, f, ln = false, false, false
+					for _, fnVal := range strings.Split(fnValues, ",") {
+						switch fnVal {
+						case "-":
+							continue // keep them all false same as "empty"
+						case "p":
+							p = true
+						case "f":
+							f = true
+						case "ln":
+							ln = true
+						}
+					}
+				}
+				lld := logLevelData{
+					Raw:       raw,
+					Constant:  name.Name,
+					Level:     level,
+					Short:     cMap["short"],
+					Long:      cMap["long"],
+					Color:     cMap["color"],
+					AsPrint:   p,
+					AsPrintf:  f,
+					AsPrintln: ln,
+				}
+				loglevels = append(loglevels, lld)
+			case "formatType", "colorType":
+				if currValue != "" {
+					val, err = strconv.Atoi(currValue)
+					if err != nil {
+						// this assumes a "iota + x" or "iota << 1" is what is breaking it
+						strVal := strings.Split(currValue, " ")
+						val, err = strconv.Atoi(strVal[len(strVal)-1])
+						if err != nil {
+							log.Printf("second err parsing: %v\n", currValue)
+							continue
+						}
+					}
+				} else {
+					val++
+				}
+
+				if name.Name == "_" {
+					continue
+				}
+
+				var valEscStr string
+				if val != 255 {
+					valEscStr = fmt.Sprintf(`\x1b[%dm`, val)
+				}
+				esd := escStrData{
+					Raw:      "",
+					Name:     name.Name,
+					Value:    val,
+					EscValue: valEscStr,
+				}
+				escs[currType][name.Name] = esd
+			}
+
+			currComment = ""
+			currValue = ""
+
+		}
+	}
+	return VisitorFunc(FindTypes)
+
+}
+
+// FindTypes loops through the nodes
+func FindTypes(n ast.Node) ast.Visitor {
 	switch n := n.(type) {
 	case *ast.Package:
 		return VisitorFunc(FindTypes)
 	case *ast.File:
 		return VisitorFunc(FindTypes)
 	case *ast.TypeSpec:
-		var s *ast.StructType
-		var ok bool
-		if s, ok = n.Type.(*ast.StructType); !ok {
-			return VisitorFunc(FindTypes)
-		}
-		if n.Name.Name != "baseLogger" {
-			return VisitorFunc(FindTypes)
-		}
-		for _, f := range s.Fields.List {
-			blFields = append(blFields, f.Names[0].Name)
-		}
+		return findType_TypeSpec(n)
 	case *ast.GenDecl:
-		if n.Tok == token.TYPE {
-			return VisitorFunc(FindTypes)
-		}
-		if n.Tok == token.CONST {
-			for _, spec := range n.Specs {
-				vspec := spec.(*ast.ValueSpec)
-				for _, name := range vspec.Names {
-					if vspec.Type != nil {
-						ident, ok := vspec.Type.(*ast.Ident)
-						if ok {
-							currType = ident.Name
-						}
-
-					}
-					if comment := vspec.Comment; comment != nil {
-						for _, commGrp := range comment.List {
-							currComment = commGrp.Text // assume only one comment
-						}
-					}
-
-					if values := vspec.Values; values != nil {
-						for _, expression := range values {
-							currValue = exprToStr(expression)
-						}
-					}
-
-					raw := fmt.Sprintf("%s (%s:%q) = %s\n", name.Name, currType, currComment, currValue)
-
-					switch currType {
-					case "levelType":
-						leveltypes = append(leveltypes, name.Name)
-					case "logLevel":
-						cMap := commTagToMap(currComment)
-						level := strings.TrimPrefix(name.Name, "Level")
-						if _, ok := cMap["long"]; !ok {
-							cMap["long"] = level
-						}
-
-						if cMap["short"] == "-" {
-							cMap["short"] = ""
-						}
-
-						if cMap["long"] == "-" {
-							cMap["long"] = ""
-						}
-						p, f, ln := true, true, true
-						if fnValues, ok := cMap["fn"]; ok {
-							p, f, ln = false, false, false
-							for _, fnVal := range strings.Split(fnValues, ",") {
-								switch fnVal {
-								case "-":
-									continue // keep them all false same as "empty"
-								case "p":
-									p = true
-								case "f":
-									f = true
-								case "ln":
-									ln = true
-								}
-							}
-						}
-						lld := logLevelData{
-							Raw:       raw,
-							Constant:  name.Name,
-							Level:     level,
-							Short:     cMap["short"],
-							Long:      cMap["long"],
-							Color:     cMap["color"],
-							AsPrint:   p,
-							AsPrintf:  f,
-							AsPrintln: ln,
-						}
-						loglevels = append(loglevels, lld)
-					case "formatType", "colorType":
-						if currValue != "" {
-							val, err = strconv.Atoi(currValue)
-							if err != nil {
-								// this assumes a "iota + x" or "iota << 1" is what is breaking it
-								strVal := strings.Split(currValue, " ")
-								val, err = strconv.Atoi(strVal[len(strVal)-1])
-								if err != nil {
-									log.Printf("second err parsing: %v\n", currValue)
-									continue
-								}
-							}
-						} else {
-							val++
-						}
-
-						if name.Name == "_" {
-							continue
-						}
-
-						var valEscStr string
-						if val != 255 {
-							valEscStr = fmt.Sprintf(`\x1b[%dm`, val)
-						}
-						esd := escStrData{
-							Raw:      "",
-							Name:     name.Name,
-							Value:    val,
-							EscValue: valEscStr,
-						}
-						escs[currType][name.Name] = esd
-					}
-
-					currComment = ""
-					currValue = ""
-
-				}
-			}
-			return VisitorFunc(FindTypes)
-		}
+		return findType_GenDecl(n)
 	}
 	return nil
 }
@@ -368,13 +373,13 @@ import (
 type Logger interface {
 {{- range $idx, $value := .Loglevels  }}
 {{- if $value.AsPrint }}
-	{{$value.Level}}(...interface{})
+	{{$value.Level}}(...interface{}) Return
 {{- end -}}
 {{- if $value.AsPrintf }}
-	{{$value.Level}}f(string, ...interface{})
+	{{$value.Level}}f(string, ...interface{}) Return
 {{- end -}}
 {{- if $value.AsPrintln }}
-	{{$value.Level}}ln(...interface{})
+	{{$value.Level}}ln(...interface{}) Return
 {{- end -}}
 {{end}}
 	Color(colorType) Logger
@@ -388,18 +393,23 @@ type Logger interface {
 	With(...optFunc) Logger
 }
 
+var levelTypeToStringMap = map[levelType]map[logLevel]string{
+	{{- range $idx1, $value1 := .LevelTypes }}
+	{{$value1}}: map[logLevel]string{
+	{{- range $idx2, $value2 := $.Loglevels }}
+		{{$value2.Constant}}: "{{lt_str $value1 $value2}}",
+	{{- end }}
+	},
+	{{- end }}
+}
+
 func (ll logLevel) ToString(kind levelType) string {
-	switch kind {
-	{{- range $idx1, $value1 := .LevelTypes}}
-	case {{$value1}}:
-		switch ll {
-		{{- range $idx2, $value2 := $.Loglevels  }}
-		case {{$value2.Constant}}:
-			return "{{lt_str $value1 $value2}}"
-		{{- end}}
+	if knd, ok := levelTypeToStringMap[kind]; ok {
+		if str, ok := knd[ll]; ok {
+			return str
 		}
-	{{- end}}
 	}
+
 	return "unknown"
 }
 
@@ -418,9 +428,9 @@ func (l *baseLogger) levelStr(ll logLevel) string {
 
 {{ range $idx, $value := .Loglevels }}
 {{ if $value.AsPrint }}
-func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
+func (l *baseLogger) {{$value.Level}}(v ...interface{}) Return {
 	if l.skip&{{$value.Constant}} != 0 {
-		return
+		return l.rtn()
 	}
 	ctx := context{
 		is:          asPrint,
@@ -435,8 +445,8 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 		wg:          &sync.WaitGroup{},
 	}
 
-	if l.color == UnkColor {
-		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	if l.color == ColorUnk {
+		ctx.colors = [3]ESCStringer{ColorUnk, ColorUnk, ColorUnk}
 	}
 
 	for k, val := range l.kv {
@@ -464,13 +474,14 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) {
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
-	{{ end -}}
+	{{ end }}
+	return l.rtn()
 }
 {{ end }}
 {{ if $value.AsPrintf }}
-func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
+func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) Return {
 	if l.skip&{{$value.Constant}} != 0 {
-		return
+		return l.rtn()
 	}
 	ctx := context{
 		is:          asPrintf,
@@ -486,8 +497,8 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 		wg:          &sync.WaitGroup{},
 	}
 
-	if l.color == UnkColor {
-		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	if l.color == ColorUnk {
+		ctx.colors = [3]ESCStringer{ColorUnk, ColorUnk, ColorUnk}
 	}
 
 	for k, val := range l.kv {
@@ -516,13 +527,14 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) {
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
-	{{ end -}}
+	{{ end }}
+	return l.rtn()
 }
 {{ end }}
 {{ if $value.AsPrintln }}
-func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
+func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) Return {
 	if l.skip&{{$value.Constant}} != 0 {
-		return
+		return l.rtn()
 	}
 	ctx := context{
 		is:          asPrintln,
@@ -541,8 +553,8 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 		wg:          &sync.WaitGroup{},
 	}
 
-	if l.color == UnkColor {
-		ctx.colors = [3]ESCStringer{UnkColor, UnkColor, UnkColor}
+	if l.color == ColorUnk {
+		ctx.colors = [3]ESCStringer{ColorUnk, ColorUnk, ColorUnk}
 	}
 
 	for k, val := range l.kv {
@@ -576,20 +588,21 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) {
 	{{ end -}}
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
-	{{ end -}}
+	{{ end }}
+	return l.rtn()
 }
 {{- end -}}
 {{ end}}
 
 {{- range $idx, $value := .Loglevels }}
 {{- if $value.AsPrint }}
-func (l nilLogger) {{$value.Level}}(v ...interface{})                 {}
+func (l nilLogger) {{$value.Level}}(v ...interface{}) Return                 { return Return{} }
 {{- end -}}
 {{- if $value.AsPrintf }}
-func (l nilLogger) {{$value.Level}}f(format string, v ...interface{}) {}
+func (l nilLogger) {{$value.Level}}f(format string, v ...interface{}) Return { return Return{} }
 {{- end -}}
 {{- if $value.AsPrintln }}
-func (l nilLogger) {{$value.Level}}ln(v ...interface{})               {}
+func (l nilLogger) {{$value.Level}}ln(v ...interface{}) Return               { return Return{} }
 {{- end -}}
 {{- end}}
 func (l nilLogger) Color(colorType) Logger               { return l }

@@ -62,7 +62,7 @@ func TestMultipleOutput(t *testing.T) {
 
 	have := new(bytes.Buffer)
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Println, l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
 		have.Reset()
@@ -95,7 +95,7 @@ func TestMultipleShortOutput(t *testing.T) {
 
 	have := new(bytes.Buffer)
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln, l.Fatal} {
 		have.Reset()
@@ -155,7 +155,7 @@ func TestWithOutput(t *testing.T) {
 
 	have := new(bytes.Buffer)
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
 	l2 := l.With(WithPrefix(LevelShortStr))
 	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
@@ -203,7 +203,7 @@ func TestPanicPrint(t *testing.T) {
 		}
 	}()
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panic} {
 		lg("This is", "a test")
@@ -230,7 +230,7 @@ func TestPanicPrintf(t *testing.T) {
 		}
 	}()
 
-	type tt func(string, ...interface{})
+	type tt func(string, ...interface{}) Return
 	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panicf} {
 		lg("%s %s", "This is", "a test")
@@ -257,7 +257,7 @@ func TestPanicPrintln(t *testing.T) {
 		}
 	}()
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panicln} {
 		lg("This is", "a test")
@@ -278,7 +278,7 @@ func TestMultipleNoColorOutput(t *testing.T) {
 
 	have := new(bytes.Buffer)
 
-	type tt func(...interface{})
+	type tt func(...interface{}) Return
 	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{
 		l.NoColor().Print,
@@ -312,7 +312,7 @@ func TestMultipleFormattedOutput(t *testing.T) {
 
 	have := new(bytes.Buffer)
 
-	type tt func(string, ...interface{})
+	type tt func(string, ...interface{}) Return
 	l := New(WithOutput(have), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Printf, l.Infof, l.Warnf, l.Errorf, l.Debugf, l.Tracef, l.Fatalf} {
 		have.Reset()
@@ -511,17 +511,27 @@ func TestInlineKVOutput(t *testing.T) {
 
 func TestOnErrorOutput(t *testing.T) {
 	want := "TEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
+	wantErrCheck1 := false
+	wantErrCheck2 := true
 	have := new(bytes.Buffer)
 
 	l := New(WithOutput(have), WithTimeText("TEST"))
 
 	var err error
-	l.OnErr(err).Info("This is a simple test that is NOT an error")
+	haveErrCheck1 := l.OnErr(err).Info("This is a simple test that is NOT an error")
 	err = errors.New("simple test")
-	l.OnErr(err).Infoln("This is a", err)
+	haveErrCheck2 := l.OnErr(err).Infoln("This is a", err)
 
 	if want != have.String() {
 		t.Errorf("\nwant: %q\n\nhave: %q\n", want, have.String())
+	}
+
+	if wantErrCheck1 != haveErrCheck1.HasErr {
+		t.Errorf("\nwant: %b\n\nhave: %b\n", wantErrCheck1, haveErrCheck1.HasErr)
+	}
+
+	if wantErrCheck2 != haveErrCheck2.HasErr {
+		t.Errorf("\nwant: %b\n\nhave: %b\n", wantErrCheck2, haveErrCheck2.HasErr)
 	}
 }
 
@@ -867,7 +877,56 @@ func BenchmarkFormat(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// The lucky line below has more parameters than directives because the KV's get taken out.
-		l.Printf("Testing with a string of %02d\n", i, KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"), KV("hello", "world"))
+		l.Printf("Testing with a string of %02d\n", i, KV("hello0", "world"), KV("hello1", "world"), KV("hello2", "world"), KV("hello3", "world"), KV("hello4", "world"), KV("hello5", "world"), KV("hello6", "world"), KV("hello7", "world"), KV("hello8", "world"), KV("hello9", "world"))
+	}
+}
+
+func BenchmarkFormat2(b *testing.B) {
+	b.ReportAllocs()
+
+	have := new(bytes.Buffer)
+	l := New(WithOutput(have))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// The lucky line below has more parameters than directives because the KV's get taken out.
+		l.Fields(map[string]interface{}{
+			"hello1": "world",
+			"hello2": "world",
+			"hello3": "world",
+			"hello4": "world",
+			"hello5": "world",
+			"hello6": "world",
+			"hello7": "world",
+			"hello8": "world",
+			"hello9": "world",
+			"hello0": "world",
+		}).Printf("Testing with a string of %02d\n", i)
+	}
+}
+
+func BenchmarkFormat3(b *testing.B) {
+	b.ReportAllocs()
+
+	have := new(bytes.Buffer)
+	l := New(WithOutput(have))
+	l2 := l.Fields(map[string]interface{}{
+		"hello1": "world",
+		"hello2": "world",
+		"hello3": "world",
+		"hello4": "world",
+		"hello5": "world",
+		"hello6": "world",
+		"hello7": "world",
+		"hello8": "world",
+		"hello9": "world",
+		"hello0": "world",
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// The lucky line below has more parameters than directives because the KV's get taken out.
+		l2.Printf("Testing with a string of %02d\n", i)
 	}
 }
 
