@@ -499,6 +499,7 @@ func WithTimeFormat(format string) optFunc {
 	}
 }
 
+// WriterToFileDescriptor is an interface to define a TTY interface
 type WriterToFileDescriptor interface {
 	Fd() uintptr
 }

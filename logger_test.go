@@ -527,11 +527,11 @@ func TestOnErrorOutput(t *testing.T) {
 	}
 
 	if wantErrCheck1 != haveErrCheck1.HasErr {
-		t.Errorf("\nwant: %b\n\nhave: %b\n", wantErrCheck1, haveErrCheck1.HasErr)
+		t.Errorf("\nwant: %t\n\nhave: %t\n", wantErrCheck1, haveErrCheck1.HasErr)
 	}
 
 	if wantErrCheck2 != haveErrCheck2.HasErr {
-		t.Errorf("\nwant: %b\n\nhave: %b\n", wantErrCheck2, haveErrCheck2.HasErr)
+		t.Errorf("\nwant: %t\n\nhave: %t\n", wantErrCheck2, haveErrCheck2.HasErr)
 	}
 }
 

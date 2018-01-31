@@ -146,7 +146,7 @@ type VisitorFunc func(n ast.Node) ast.Visitor
 // Visit does the node walking
 func (f VisitorFunc) Visit(n ast.Node) ast.Visitor { return f(n) }
 
-func findType_TypeSpec(node *ast.TypeSpec) ast.Visitor {
+func findTypeTypeSpec(node *ast.TypeSpec) ast.Visitor {
 	var s *ast.StructType
 	var ok bool
 	if s, ok = node.Type.(*ast.StructType); !ok {
@@ -161,7 +161,7 @@ func findType_TypeSpec(node *ast.TypeSpec) ast.Visitor {
 	return nil
 }
 
-func findType_GenDecl(n *ast.GenDecl) ast.Visitor {
+func findTypeGenDecl(n *ast.GenDecl) ast.Visitor {
 	if n.Tok != token.CONST {
 		return VisitorFunc(FindTypes)
 	}
@@ -291,9 +291,9 @@ func FindTypes(n ast.Node) ast.Visitor {
 	case *ast.File:
 		return VisitorFunc(FindTypes)
 	case *ast.TypeSpec:
-		return findType_TypeSpec(n)
+		return findTypeTypeSpec(n)
 	case *ast.GenDecl:
-		return findType_GenDecl(n)
+		return findTypeGenDecl(n)
 	}
 	return nil
 }
@@ -475,7 +475,9 @@ func (l *baseLogger) {{$value.Level}}(v ...interface{}) Return {
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
 	{{ end }}
+	{{- if (ne $value.Long "Panic") }}
 	return l.rtn()
+	{{- end }}
 }
 {{ end }}
 {{ if $value.AsPrintf }}
@@ -528,7 +530,9 @@ func (l *baseLogger) {{$value.Level}}f(format string, v ...interface{}) Return {
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
 	{{ end }}
+	{{- if (ne $value.Long "Panic") }}
 	return l.rtn()
+	{{- end }}
 }
 {{ end }}
 {{ if $value.AsPrintln }}
@@ -589,7 +593,9 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) Return {
 	{{- if (eq $value.Long "Fatal") }}
 	l.fatal(l.fatali)
 	{{ end }}
+	{{- if (ne $value.Long "Panic") }}
 	return l.rtn()
+	{{- end }}
 }
 {{- end -}}
 {{ end}}
