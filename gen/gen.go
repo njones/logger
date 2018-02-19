@@ -353,6 +353,9 @@ func levelTypeStr(a string, b logLevelData) string {
 }
 
 func colorStr(p, s string) string {
+	if s == "-" || s == "" {
+		s = "unk"
+	}
 	return p + "Color" + strings.Title(s)
 }
 
@@ -544,7 +547,7 @@ func (l *baseLogger) {{$value.Level}}ln(v ...interface{}) Return {
 		is:          asPrintln,
 		{{- if (eq $value.Constant "LevelHTTP") }}
 		tsStrCh:     tsChanText(""), // sending back empty text only for HTTPln, because we don't want to display it
-		{{- else}}
+		{{- else }}
 		tsStrCh:     tsChan(l.tsText, l.tsFormat, l.ts, l.tsIsUTC),
 		{{- end }}
 		colors:      [3]ESCStringer{{color "{" $value.Color}}, l.color, SeqReset},

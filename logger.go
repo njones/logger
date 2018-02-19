@@ -46,7 +46,7 @@ const (
 	LevelTrace                      //`short:"TRC" color:"blue"`
 	LevelFatal                      //`short:"FAT" color:"red"`
 	LevelPanic                      //`short:"PAN" color:"red"`
-	LevelHTTP                       //`short:"-" long:"-" color:"green" fn:"ln"`
+	LevelHTTP                       //`short:"-" long:"-" color:"-" fn:"ln"`
 )
 
 // The levelType int repressentations which determine how the log level will be displayed.
@@ -252,8 +252,11 @@ func (l *baseLogger) out() {
 		// always end on a newline
 		buf.WriteByte([]byte("\n")[0])
 
+		// grab the line
+		bufln := buf.String()
+
 		// write the log line to all io.Writers
-		if _, err := fmt.Fprint(l.stdout, buf.String()); err != nil {
+		if _, err := fmt.Fprint(l.stdout, bufln); err != nil {
 			fmt.Fprintln(l.stderr, "error writing to log:", err)
 		}
 
@@ -261,14 +264,14 @@ func (l *baseLogger) out() {
 		// data to a filtered io.Writer
 		if l.hasFilter {
 			logg.wg.Add(1)
-			go func(logln string, p1, p2 int) {
+			go func(logln []byte, filterln string) {
 				for _, w := range l.o {
 					if fw, ok := w.(filterwriter); ok {
-						fw.Callback(logln, p1, p2)
+						fw.Callback(logln, filterln)
 					}
 				}
 				logg.wg.Done()
-			}(buf.String(), lenPoint1, lenPoint2)
+			}(buf.Bytes(), bufln[lenPoint1:lenPoint2])
 		}
 
 		// reset things and move on!
@@ -374,7 +377,7 @@ func itoa(buf *[20]byte, i int, wid int, start int) {
 	copy((*buf)[start:], b[bp:])
 }
 
-//tsChantsChanEmpty is a function that returns the passed in text string as the time
+//tsChanText is a function that returns the passed in text string as the time
 func tsChanText(text string) chan string {
 	ch := tsChanPool.Get().(chan string)
 	go func() { ch <- text }()
@@ -577,14 +580,15 @@ func RegexFilter(pattern string) Filter {
 	return &filterRegex{regexp: regexp.MustCompile(pattern)}
 }
 
-// filterRegex is a type to define a function that accepts a regualar expression to filter log lines.
+// filterRegex is a type to define a function that accepts a regular expression to filter log lines.
 type filterRegex struct{ regexp *regexp.Regexp }
 
 // Check satisfies the Filter interface and matches against a regular expression
 func (r *filterRegex) Check(data string) bool { return r.regexp.MatchString(data) }
 
-// filterwriter the underling struct that will filter input to the supplied witer. This happens
-// because writes come through the callback and not through the io.Writer interface.
+// filterwriter is the underlining struct that will filter input to the 
+// supplied writer. This happens because writes come through the callback 
+// and not through the io.Writer interface.
 type filterwriter struct {
 	filters []Filter
 	w       io.Writer
@@ -598,11 +602,10 @@ func (filterwriter) Write(p []byte) (n int, err error) {
 
 // Callback is the method called by the logger, and will filter out log lines
 // based on some criteria.
-func (fw filterwriter) Callback(logln string, pre, line int) {
-	data := logln[pre:line]
+func (fw filterwriter) Callback(logln []byte, filterln string) {
 	for _, filter := range fw.filters {
-		if !filter.Check(data) {
-			fw.w.Write([]byte(logln))
+		if !filter.Check(filterln) {
+			fw.w.Write(logln)
 			return
 		}
 	}

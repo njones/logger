@@ -727,7 +727,7 @@ func TestHttpHandlerOutput(t *testing.T) {
 	wantHeader, wantHeaderValue := "X-Session-Id", "Test"
 	wantBody := `This is a simple test`
 
-	want := "\x1b[32m192.0.2.1:1234 - - [TEST] \"GET /test/endpoint HTTP/1.1\" 200 21  \x1b[0m X-Session-Id=Test\nTEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
+	want := "192.0.2.1:1234 - - [TEST] \"GET /test/endpoint HTTP/1.1\" 200 21  \x1b[0m X-Session-Id=Test\nTEST \x1b[32mInfo: This is a simple test\x1b[0m\n"
 	have := new(bytes.Buffer)
 
 	l := New(WithOutput(have), WithHTTPHeader(wantHeader), WithTimeText("TEST"))
