@@ -586,8 +586,8 @@ type filterRegex struct{ regexp *regexp.Regexp }
 // Check satisfies the Filter interface and matches against a regular expression
 func (r *filterRegex) Check(data string) bool { return r.regexp.MatchString(data) }
 
-// filterwriter is the underlining struct that will filter input to the 
-// supplied writer. This happens because writes come through the callback 
+// filterwriter is the underlining struct that will filter input to the
+// supplied writer. This happens because writes come through the callback
 // and not through the io.Writer interface.
 type filterwriter struct {
 	filters []Filter
@@ -679,7 +679,7 @@ func (se *stripescwriter) StDone(b byte) bool {
 // Write looks for the escape character and strips out any codes via a simple state machine.
 // This may flush to the underlining writer more than once.
 func (se stripescwriter) Write(p []byte) (n int, err error) {
-	var start int
+	var start, skipped int
 	for i, b := range p {
 		if se.state == nil && b == 0x1b {
 			se.state = (*stripescwriter).StBracket
@@ -695,12 +695,14 @@ func (se stripescwriter) Write(p []byte) (n int, err error) {
 			start = i
 			continue
 		}
+		skipped++
 	}
 	if se.state == nil {
 		n2, err2 := se.w.Write(p[start:])
 		n, err = n+n2, err2
 	}
-	return n, err
+
+	return n + skipped, err
 }
 
 // ResponseWriter holds an embedded HTTP ResponseWriter but will capture the status

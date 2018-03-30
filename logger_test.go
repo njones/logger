@@ -777,11 +777,25 @@ func TestHttpHandlerOutput(t *testing.T) {
 	l2.Info(wantBody)
 }
 
+type writeCountTest struct {
+	w io.Writer
+	t *testing.T
+}
+
+func (w writeCountTest) Write(p []byte) (n int, err error) {
+	n, err = w.w.Write(p)
+	if n != len(p) {
+		w.t.Errorf("want: %d have: %d (strip write count)", len(p),  n)
+	}
+	return
+}
+
 func TestWithNoColorOutput(t *testing.T) {
 	want := "TEST Info: This is a simple test\n"
 	have := new(bytes.Buffer)
 
-	l := New(WithOutput(StripWriter(have)), WithTimeText("TEST"))
+	sw := writeCountTest{w: StripWriter(have), t: t}
+	l := New(WithOutput(sw), WithTimeText("TEST"))
 	l.Info("This is a simple test")
 
 	if want != have.String() {
