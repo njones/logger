@@ -123,6 +123,8 @@ type baseLogger struct {
 
 	to chan context
 
+	prefix string
+
 	ts       *time.Time
 	tsIsUTC  bool
 	tsText   string
@@ -224,6 +226,7 @@ func (l *baseLogger) out() {
 
 		buf.WriteString(string(logg.colors[colorIdx].ESCStr()))
 		buf.WriteString(logg.levelStr)
+		buf.WriteString(string(l.prefix))
 		lenPoint1 = buf.Len()
 
 		// write the log line
@@ -473,8 +476,15 @@ func StdKVMarshal(in interface{}) ([]byte, error) {
 	return []byte(strings.Join(rtns, " ")), nil
 }
 
-// WithPrefix changes the prefix of the log level to be different.
-func WithPrefix(lt levelType) optFunc {
+// WithPrefix Adds a prefix to the logger.
+func WithPrefix(s string) optFunc {
+	return func(l *baseLogger) {
+		l.prefix = l.prefix + s + " "
+	}
+}
+
+// WithLevelPrefix changes the prefix of the log level to be different.
+func WithLevelPrefix(lt levelType) optFunc {
 	return func(l *baseLogger) {
 		l.logLevel = lt
 	}

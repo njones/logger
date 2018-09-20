@@ -47,6 +47,25 @@ func errorMarshal(i interface{}) ([]byte, error) {
 	return nil, errors.New(strMarshalError)
 }
 
+func TestWithPrefix(t *testing.T) {
+
+	want := []string{
+		"TEST \x1b[32mInfo: [prefix included] This is a test\x1b[0m\n",
+	}
+
+	have := new(bytes.Buffer)
+
+	type tt func(...interface{}) Return
+	l := New(WithOutput(have), WithTimeText("TEST"), WithPrefix("[prefix included]"))
+	for i, lg := range []tt{l.Println} {
+		have.Reset()
+		lg("This is", "a test")
+		if want[i] != have.String() {
+			t.Errorf("\nwant: %q\n\nhave: %q\n", want[i], have.String())
+		}
+	}
+}
+
 func TestMultipleOutput(t *testing.T) {
 
 	want := []string{
@@ -96,7 +115,7 @@ func TestMultipleShortOutput(t *testing.T) {
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{}) Return
-	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
+	l := New(WithOutput(have), WithLevelPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
 	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln, l.Fatal} {
 		have.Reset()
 		lg("This is", "a test")
@@ -156,8 +175,8 @@ func TestWithOutput(t *testing.T) {
 	have := new(bytes.Buffer)
 
 	type tt func(...interface{}) Return
-	l := New(WithOutput(have), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
-	l2 := l.With(WithPrefix(LevelShortStr))
+	l := New(WithOutput(have), WithLevelPrefix(LevelShortBracketStr), WithTimeText("TEST"), withFatal)
+	l2 := l.With(WithLevelPrefix(LevelShortStr))
 	for i, lg := range []tt{l.Infoln, l.Warnln, l.Errorln, l.Debugln, l.Traceln, l.Fatalln} {
 		have.Reset()
 		lg("This is", "a test")
@@ -204,7 +223,7 @@ func TestPanicPrint(t *testing.T) {
 	}()
 
 	type tt func(...interface{}) Return
-	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	l := New(WithOutput(ioutil.Discard), WithLevelPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panic} {
 		lg("This is", "a test")
 	}
@@ -231,7 +250,7 @@ func TestPanicPrintf(t *testing.T) {
 	}()
 
 	type tt func(string, ...interface{}) Return
-	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	l := New(WithOutput(ioutil.Discard), WithLevelPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panicf} {
 		lg("%s %s", "This is", "a test")
 	}
@@ -258,7 +277,7 @@ func TestPanicPrintln(t *testing.T) {
 	}()
 
 	type tt func(...interface{}) Return
-	l := New(WithOutput(ioutil.Discard), WithPrefix(LevelShortBracketStr), WithTimeText("TEST"))
+	l := New(WithOutput(ioutil.Discard), WithLevelPrefix(LevelShortBracketStr), WithTimeText("TEST"))
 	for _, lg := range []tt{l.Panicln} {
 		lg("This is", "a test")
 	}
@@ -785,7 +804,7 @@ type writeCountTest struct {
 func (w writeCountTest) Write(p []byte) (n int, err error) {
 	n, err = w.w.Write(p)
 	if n != len(p) {
-		w.t.Errorf("want: %d have: %d (strip write count)", len(p),  n)
+		w.t.Errorf("want: %d have: %d (strip write count)", len(p), n)
 	}
 	return
 }
