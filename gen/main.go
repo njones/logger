@@ -63,7 +63,7 @@ func main() {
 	timestampMap := make(map[byte]string)
 
 	if len(timestampMap) > 20 {
-		panic("the map is arbitrarily too long, becuase we're counting back from 31 in ASCII")
+		panic("the map is arbitrarily too long, because we're counting back from 31 in ASCII")
 	}
 
 	for i, v := range tsMap {
@@ -409,7 +409,7 @@ func duplicate(b *baseLogger) *baseLogger {
 {{ range $idx, $value := .Levels }}
 {{ if $value.AsPrint }}
 func (b *baseLogger) {{ $value.FuncName }}(v ...interface{}) {
-	if !hasFlag(b.supress, {{ $value.LevelName }}.flag()) {
+	if !hasFlag(b.suppress, {{ $value.LevelName }}.flag()) {
 		{{- template "preHook" . -}}
 		b.print(bPrint, v{{ $value.Writeize }}{{ $value.Levelize }}{{ $value.Colorize }}{{ $value.Timeize }});
 		{{- template "postHook" . -}}
@@ -418,7 +418,7 @@ func (b *baseLogger) {{ $value.FuncName }}(v ...interface{}) {
 {{ end }}
 {{ if $value.AsPrintf }}
 func (b *baseLogger) {{ $value.FuncName }}f(f string, v ...interface{}) {
-	if !hasFlag(b.supress, {{ $value.LevelName }}.flag()) {
+	if !hasFlag(b.suppress, {{ $value.LevelName }}.flag()) {
 		{{- template "preHook" . -}}
 		b.print(bPrintf, v, formatize(f){{ $value.Writeize }}{{ $value.Levelize }}{{ $value.Colorize }}{{ $value.Timeize }});
 		{{- template "postHook" . -}}
@@ -427,7 +427,7 @@ func (b *baseLogger) {{ $value.FuncName }}f(f string, v ...interface{}) {
 {{ end }}
 {{ if $value.AsPrintln }}
 func (b *baseLogger) {{ $value.FuncName }}ln(v ...interface{}) {
-	if !hasFlag(b.supress, {{ $value.LevelName }}.flag()) {
+	if !hasFlag(b.suppress, {{ $value.LevelName }}.flag()) {
 		{{- template "preHook" . -}}
 		b.print(bPrintln, v{{ $value.Writeize }}{{ $value.Levelize }}{{ $value.Colorize }}{{ $value.Timeize }});
 		{{- template "postHook" . -}}
