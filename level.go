@@ -1,6 +1,6 @@
 package logger
 
-// logLevel is defined so the we can supress different levels as needed
+// logLevel is defined so the we can suppress different levels as needed
 type logLevel uint16
 
 // print is the Print(f,ln) log level (which is the same as Info), but not exported

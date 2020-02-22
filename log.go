@@ -12,7 +12,7 @@ import (
 type rxMap map[*regexp.Regexp]func(Logger, map[string]string)
 
 type syncWriter struct {
-	w  io.Writer
+	w    io.Writer
 	sync *sync.WaitGroup
 }
 

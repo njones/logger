@@ -17,7 +17,7 @@ func KV(k K, v V) KeyVal {
 	return KeyVal{k, v}
 }
 
-// convertStamp converts a timestamp from the std libary format of (i.e. 2006-02-01) to
+// convertStamp converts a timestamp from the std library format of (i.e. 2006-02-01) to
 // the internal single byte representation (i.e. \x06-\x02-\x01)
 func convertStamp(format string) string {
 	for _, k := range tsMap {
