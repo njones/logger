@@ -11,4 +11,4 @@ go:
   - master
 
 script: 
-  - "go test -v -race ./..." -timeout=30s
+  - "go test -v -race ./... -timeout=30s"

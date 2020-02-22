@@ -18,6 +18,7 @@ const (
 	LstdFlags     = Ldate | Ltime // initial values for the standard logger
 )
 
+// WithColor adds color to the logged output (overriding any level colors)
 func WithColor(v color.Foreground) optFunc {
 	var escColor = []byte(v.ToESC())
 	return func(b *baseLogger) {
@@ -25,6 +26,7 @@ func WithColor(v color.Foreground) optFunc {
 	}
 }
 
+// WithHTTPHeader takes headers and addes them as a structured K/V pair to the logged output
 func WithHTTPHeader(headers ...string) optFunc {
 	return func(b *baseLogger) {
 		b.http.headers = make(KVMap)
@@ -36,12 +38,15 @@ func WithHTTPHeader(headers ...string) optFunc {
 	}
 }
 
+// WithKVMarshaler takes a encoding.Marshaler interface and uses it to marshal kv values
 func WithKVMarshaler(fn func(interface{}) ([]byte, error)) optFunc {
 	return func(b *baseLogger) {
 		b.kv.marshal = fn
 	}
 }
 
+// WithOutput adds the ws writers to the logged output. This can be overridden by using
+// the logger.Output function. A nil or empty ws []io.Writer uses os.Stdout as the writer
 func WithOutput(ws ...io.Writer) optFunc {
 	if len(ws) == 0 {
 		ws = []io.Writer{os.Stdout}
@@ -51,12 +56,19 @@ func WithOutput(ws ...io.Writer) optFunc {
 	}
 }
 
+// WithTimeFormat formats the time according to the format value. Once the time has been
+// formatted, it can apply any func(string)string function to the format, this can be
+// used to uppercase the string (i.e. strings.ToUpper) for example. A empty value removes
+// the time from the log output
 func WithTimeFormat(format string, fns ...func(string) string) optFunc {
 	return func(b *baseLogger) {
 		b.ts.fns = fns
 		b.ts.stamp = convertStamp(format)
 	}
 }
+
+// WithTimeText replaces the timestamp value with the provided text, a empty value does
+// not replace any timestamp formatted value
 func WithTimeText(text string) optFunc {
 	return func(b *baseLogger) {
 		b.ts.text = []byte(text)
