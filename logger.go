@@ -26,10 +26,10 @@ var lPool = sync.Pool{
 }
 
 type baseLogger struct {
-	flags   int
-	depth   int
-	display int
-	supress int
+	flags    int
+	depth    int
+	display  int
+	suppress int
 
 	ts struct {
 		now   time.Time
@@ -150,7 +150,7 @@ func (b *baseLogger) Fields(kvs map[string]interface{}) Logger {
 func (b *baseLogger) OnErr(err error) OnErrLogger { return &onErrLogger{b: b, err: err} }
 
 func (b *baseLogger) Suppress(i logLevel) Logger {
-	b.supress = int(i)
+	b.suppress = int(i)
 	return b
 }
 

@@ -423,7 +423,7 @@ func TestFilename(t *testing.T) {
 				WithTimeFormat("06-Jan-02", strings.ToUpper),
 				withTime(time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC))),
 			input: "abcdefghi",
-			want:  regexp.MustCompile(`70-JAN-01 (/\w+)+/line.go:\d+ abcdefghi\n`),
+			want:  regexp.MustCompile(`70-JAN-01 (/[\w\.]+)+/line.go:\d+ abcdefghi\n`),
 		},
 		{
 			name:  "log.Output long Filename",
@@ -464,7 +464,7 @@ func TestFilename(t *testing.T) {
 				withTime(time.Date(1970, 1, 1, 0, 20, 0, 0, time.UTC))).
 				OnErr(bytes.ErrTooLarge),
 			input: "abcdefghi",
-			want:  regexp.MustCompile(`70-JAN-01 (/\w+)+/line.go:\d+ abcdefghi\n`),
+			want:  regexp.MustCompile(`70-JAN-01 (/[\w\.]+)+/line.go:\d+ abcdefghi\n`),
 		},
 		{
 			name:  "log.Output long Filename OnErr",
