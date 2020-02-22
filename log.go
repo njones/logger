@@ -13,8 +13,6 @@ type rxMap map[*regexp.Regexp]func(Logger, map[string]string)
 
 type syncWriter struct {
 	w  io.Writer
-	ch chan int
-
 	sync *sync.WaitGroup
 }
 
