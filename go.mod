@@ -3,8 +3,8 @@ module github.com/njones/logger
 go 1.13
 
 require (
-	github.com/njones/logger/color v0.0.0
-	github.com/njones/logger/kv v0.0.0
+	github.com/njones/logger/color v1.0.3
+	github.com/njones/logger/kv v1.0.3
 )
 
 replace (
